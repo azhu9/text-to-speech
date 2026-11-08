@@ -7,22 +7,33 @@ notes and highlights. AI question-answering comes later.
 > Naming: this is our own app with similar features. We should give it its own
 > name and look and not reuse Speechify's name, logo or design.
 
+## Decisions so far
+
+| Question | Answer | What it changes |
+|---|---|---|
+| Who uses it? | Just me, but with **Google sign-in** | Add Google login, restricted to my account. Data lives on a server so it follows the login. |
+| Devices | **Mostly desktop** | Desktop-first layout; phone is "works, not polished". In-browser AI voices are practical on desktop GPUs. |
+| Voice budget | **Free voices only** | Browser voices + Kokoro. No paid TTS. |
+| Offline | Not required, nice to have | Online-first; offline mode is a late polish item. |
+| Content | **PDF readings and scanned textbooks** | **OCR moves into v1.** Original-page view becomes the main view. |
+
 ---
 
 ## 1. Goals and non-goals
 
 **Goals (v1)**
-- Import **PDF** and **plain-text / Markdown** files.
+- Import **PDF** (text-based **and scanned**, via OCR) and **plain-text / Markdown** files.
 - Read aloud with **adjustable speed** (0.5x–4x) and **several voices**.
 - **Follow-along highlighting** of the sentence (and ideally word) being read.
 - **Highlights and notes** tied to passages, kept between sessions.
 - Remember **reading position** per document.
-- Runs as a **web app** on desktop and phone browsers.
+- Runs as a **web app**, desktop-first.
+- **Sign in with Google**; library, notes and positions saved to my account.
 
 **Later (v2+)**
 - **Ask AI** about the document (Q&A, summaries, explain a passage).
-- More formats: EPUB, DOCX, web pages (paste a URL), images / scanned PDFs (OCR).
-- Accounts and sync across devices.
+- More formats: EPUB, DOCX, web pages (paste a URL), photos of pages.
+- Offline mode (PWA caching).
 - Offline audio export (MP3 of a document).
 
 **Non-goals for now**
@@ -39,7 +50,7 @@ notes and highlights. AI question-answering comes later.
 |---|---|---|
 | `.txt`, `.md` | Read with `FileReader`; Markdown stripped to plain text for speech | Easy |
 | PDF (text-based) | [`pdf.js`](https://mozilla.github.io/pdf.js/) to render pages and extract text | Main difficulty is cleanup (below) |
-| PDF (scanned) | OCR with `tesseract.js` | v2 |
+| PDF (scanned) | Detect pages with no text layer → OCR with `tesseract.js` in a background Web Worker | **v1** (see 2.1a) |
 | EPUB / DOCX / URL | `epub.js`, `mammoth`, Readability | v2 |
 
 **PDF text cleanup** is where most of the effort goes:
@@ -69,6 +80,27 @@ type Block = {
 
 Splitting into sentences up front (`Intl.Segmenter`) is what makes
 speech chunking, highlighting, notes and later the AI feature work cleanly.
+
+### 2.1a OCR for scanned textbooks
+Scanned PDFs are just pictures of pages; there is no text to read until OCR
+turns the image into words.
+
+- **Engine:** `tesseract.js` (free, open source, runs in the browser). Each
+  word comes back with its **position on the page** (bounding box) and a
+  confidence score. Those positions are what make highlighting on the
+  original page possible.
+- **Speed:** roughly a few seconds per page on a desktop, so a 400-page
+  textbook takes tens of minutes. OCR runs in background workers, starting
+  at the page you're reading and working outward, so you can start listening
+  right away. Results are saved, so each page is only processed once.
+- **Cleanup specific to scans:** straighten tilted pages, split two-page
+  spreads, drop running headers/page numbers, skip figure/caption regions if
+  confident, rejoin hyphenated words.
+- **Quality:** expect occasional misread words (especially equations,
+  tables, small print). A "fix this word" edit on the page view handles them.
+- **Fallback (if quality isn't good enough):** run OCRmyPDF/Tesseract on the
+  server at upload time, or try a newer open-source OCR model. Decide after
+  testing on your real textbooks.
 
 ### 2.2 Text-to-speech engine
 Built behind one interface so engines can be swapped:
@@ -105,16 +137,16 @@ there is no ongoing cost unless we choose it.
   click any sentence to start reading from there, keyboard shortcuts.
 - Remember position, voice and speed per document.
 - Cache generated audio per sentence (IndexedDB) so re-listening is free.
-- Media Session API: lock-screen / headphone controls on phones.
+- Media Session API: media keys / headphone buttons control playback.
 
 ### 2.4 Reader view and follow-along highlighting
-Two ways to view a document:
-1. **Reader view (v1):** clean reflowed text from `Doc.blocks`, adjustable
-   font size, line spacing, dark mode. Highlighting is simple here because we
-   control the HTML.
-2. **Original PDF view (v1.5):** pdf.js page rendering with its text layer,
-   highlighting mapped onto the page. Harder because extracted text has to be
-   mapped back to positions on the page.
+Two ways to view a document (see section 6 for the full explanation):
+1. **Original page view (main view, v1):** pdf.js renders the real page; the
+   current sentence is drawn as a box over it, using word positions from the
+   PDF text layer or from OCR. Best for scanned textbooks.
+2. **Reader view (optional toggle):** clean reflowed text from `Doc.blocks`,
+   adjustable font size, line spacing, dark mode. Used for `.txt`/`.md` and
+   as an alternative for long text-only PDFs.
 
 Highlighting levels:
 - **Sentence** highlight: always available (we know which chunk is playing).
@@ -140,11 +172,19 @@ Highlighting levels:
 - Export notes and highlights as Markdown.
 - Search inside the document.
 
-### 2.6 Library
-- List of imported documents with title, progress %, last opened.
-- Delete / rename.
-- Storage: files and data in the browser (**IndexedDB via Dexie**), so v1 needs
-  no backend or account. Show storage usage; large PDFs can be big.
+### 2.6 Library, login and storage
+- List of documents with title, progress %, last opened; delete / rename.
+- **Google sign-in** via Supabase Auth, with an allow-list so only my Google
+  account can log in.
+- **Where data lives:**
+  - Notes, highlights, reading positions, settings, OCR text → Supabase
+    Postgres (small, syncs with the login).
+  - The PDF files themselves → Supabase Storage. Scanned textbooks are big
+    (often 50–300 MB each), so the free tier fills up after a handful of
+    books. Options if that's a problem: keep PDFs only in this browser (OPFS)
+    and sync just the notes, or store them in my own **Google Drive** (15 GB
+    free) using the same Google login. Decide in M2.
+  - Generated audio is cached in the browser only (it can be regenerated).
 
 ### 2.7 Ask AI (v2, but designed for now)
 - Side panel: "Ask about this document", "Summarize this section",
@@ -167,15 +207,14 @@ Highlighting levels:
 | App | **Next.js (React) + TypeScript** | One codebase for UI and later the small API routes the AI/cloud voices need |
 | Styling | Tailwind CSS | Fast to build a clean reader UI |
 | State | Zustand | Simple player/reader state |
-| Storage | IndexedDB via Dexie | Local-first, no account needed |
+| Auth + database + files | **Supabase** (Google OAuth, Postgres, Storage) | Free tier, Google login built in |
+| Local cache | IndexedDB via Dexie / OPFS | Audio and page-image cache, faster reopen |
+| OCR | `tesseract.js` in Web Workers | Free, in-browser, gives word positions |
 | PDF | pdf.js (`pdfjs-dist`) | Standard, free, renders and extracts text |
 | TTS | Web Speech API → Kokoro (`kokoro-js`) → optional cloud | Free first, quality next, paid only if wanted |
 | Sentence split | `Intl.Segmenter` | Built into browsers |
-| Install on phone | PWA (manifest + service worker) | "App-like" without app stores |
 | Hosting | Vercel / Netlify (static + API routes) | Free tier is enough |
 | Tests | Vitest (logic), Playwright (end-to-end) | |
-
-Later, for sync/accounts: Supabase (Postgres + auth + file storage).
 
 ---
 
@@ -183,22 +222,22 @@ Later, for sync/accounts: Supabase (Postgres + auth + file storage).
 
 | # | Milestone | Contents | Rough size |
 |---|---|---|---|
-| **M0** | Project setup | Next.js + TS + Tailwind, lint/test, deploy pipeline, empty library page | 0.5–1 day |
-| **M1** | Read a text file aloud | Import `.txt`/`.md`, sentence split, reader view, Web Speech playback, play/pause/skip, speed, voice picker, sentence highlight | 2–3 days |
-| **M2** | PDFs | pdf.js import, text cleanup, page numbers, library + saved position | 3–5 days |
-| **M3** | Highlights and notes | Select → highlight/note, sidebar, jump to, export Markdown, search | 3–4 days |
-| **M4** | Better voices | Kokoro engine in browser, audio caching, word highlight estimate, Media Session controls | 3–5 days |
-| **M5** | Polish | Original PDF view with highlighting, dark mode, font settings, keyboard shortcuts, PWA install, mobile layout | 4–6 days |
+| **M0** | Setup + login | Next.js + TS + Tailwind, Supabase project, Google sign-in restricted to my account, deploy, empty library | 1–2 days |
+| **M1** | Read a text file aloud | Import `.txt`/`.md`, sentence split, reader view, browser voices, play/pause/skip, speed, voice picker, sentence highlight | 2–3 days |
+| **M2** | Text PDFs in page view | pdf.js page rendering, text extraction + cleanup, highlight drawn on the page, upload/storage, library, saved position | 4–6 days |
+| **M3** | Scanned textbooks (OCR) | Detect scanned pages, background OCR from current page outward, word boxes → on-page highlight, scan cleanup, fix-a-word | 5–8 days |
+| **M4** | Highlights and notes | Select → highlight/note on the page, sidebar, jump to, export Markdown, search | 3–4 days |
+| **M5** | Better free voices | Kokoro in browser (WebGPU), generate-ahead + audio cache, word highlight | 3–5 days |
 | **M6** | Ask AI | Server endpoint, Q&A panel with citations, summarize / explain selection | 3–5 days |
-| Later | Extras | Cloud voices, EPUB/DOCX/URL, OCR, MP3 export, accounts + sync | — |
+| Later | Extras | Reader view toggle polish, offline mode, EPUB/DOCX/URL, MP3 export, mobile polish | — |
 
-"Rough size" is focused working days for one developer; the first usable
-version (M1–M3) is roughly **2 weeks**.
+First usable version for your textbooks (M0–M4): roughly **3–4 weeks** of
+focused work.
 
-**Definition of done for v1 (M1–M4):** I can open a 50-page text-based PDF,
-pick a natural-sounding voice, listen at 2.5x with the current sentence
-highlighted, highlight and annotate passages, close the browser, and come back
-to the same spot with my notes intact.
+**Definition of done for v1:** sign in with Google, upload a scanned
+textbook chapter, start listening within a minute at 2.5x in a natural
+free voice, see the current sentence highlighted on the actual page, add
+highlights and notes, and come back later (any computer) to the same spot.
 
 ---
 
@@ -210,24 +249,38 @@ to the same spot with my notes intact.
 | Web Speech voices differ a lot by browser/OS | Inconsistent quality | Kokoro as the consistent quality engine |
 | Kokoro in-browser is slow on older phones | Gaps between sentences | Generate ahead while playing; WebGPU when available; small server fallback |
 | Word timing not available for some engines | Only sentence highlight | Estimate word timing; sentence highlight is the guaranteed baseline |
-| Mapping highlights onto the original PDF page | Hard to get pixel-perfect | Ship reader view first; PDF view in M5 |
+| OCR errors on textbook scans (equations, tables, small print, bad scans) | Misread words, odd speech | Confidence filtering, skip low-confidence regions, fix-a-word, server OCR fallback |
+| OCR is slow for whole books | Waiting before listening | Start at current page, process ahead in background, save results |
+| Big scanned PDFs vs free storage limits | Storage fills up | Keep files local or in Google Drive; sync only notes/text |
+| Mapping highlights onto the original page | Fiddly alignment | Use word boxes from pdf.js/OCR directly; sentence highlight as baseline |
 | Browser storage limits / cleared data | Lost library | Export/backup button; later cloud sync |
 | Cloud TTS / AI costs | Surprise bills | All paid services optional and behind our server with usage caps |
 
 ---
 
-## 6. Open questions (need your input)
+## 6. Open questions
 
-1. **Who uses it?** Just you (local-first, no login), or others too (needs accounts, sync, hosting costs)?
-2. **Devices:** mainly desktop browser, phone, or both equally?
-3. **Voice budget:** free/open-source voices only, or are you open to paying for premium cloud voices (ElevenLabs/Azure-level)?
-4. **Offline:** does it need to work without internet (e.g. on a plane)?
-5. **PDF types:** mostly papers/textbooks (columns, footnotes), ebooks, or scanned documents?
-6. **Reader view vs. original PDF look:** is reflowed text OK at first, or must highlights appear on the original page from day one?
-7. **Name** for the app?
+1. **Main view** — original page view (recommended for scanned textbooks), reflowed reader view, or both with a toggle? See explanation in chat / below.
+2. **Where should PDF files live** — Supabase Storage, this browser only, or your Google Drive?
+3. **Sample files:** a couple of real textbook scans to test OCR quality early.
+4. **Name** for the app?
+
+### What "reader view vs. original page view" means
+- **Original page view:** you see the actual PDF page (for a scan, the photo
+  of the textbook page) with figures, equations and layout intact. The
+  sentence being read is shown as a coloured box drawn over the page.
+- **Reader view:** the app pulls the text out and shows it as a clean column
+  of plain text, like a web article. You choose font size and spacing, but
+  figures, tables, equations and page layout are gone, and any OCR mistakes
+  are shown as text.
+- For scanned textbooks, original page view is the better default: you keep
+  the figures, and you can spot OCR errors against the real page. OCR gives
+  us each word's position, so this costs little extra. Reader view is useful
+  as an optional toggle for long text-only stretches.
 
 ## 7. Suggested next step
 
-Start **M0 + M1**: set up the Next.js project and get a `.txt` file reading
-aloud with speed control, voice choice and sentence highlighting. That proves
-the core loop end to end in a couple of days, and everything else builds on it.
+Start **M0 + M1**: project setup with Google sign-in, then get a `.txt` file
+reading aloud with speed, voice choice and sentence highlighting. In
+parallel, run `tesseract.js` on a few pages of your actual textbook scans to
+check OCR quality before building M3 around it.
