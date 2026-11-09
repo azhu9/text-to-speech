@@ -1,6 +1,7 @@
 export interface Paragraph {
   text: string;
   heading?: boolean;
+  small?: boolean;
 }
 
 /** Join hard-wrapped lines into one paragraph, removing end-of-line hyphenation. */

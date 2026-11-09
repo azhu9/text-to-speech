@@ -8,6 +8,8 @@ export interface Block {
   text: string;
   sentences: Sentence[];
   heading?: boolean;
+  /** smaller than the page's body text (footnotes, captions) */
+  small?: boolean;
 }
 
 export type PageStatus = 'ready' | 'ocr-pending' | 'ocr-failed';

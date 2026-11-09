@@ -14,8 +14,10 @@ M1 (text files read aloud), most of M2 (text PDFs; reflowed reader view
 with page markers instead of the original-page view), the core of M3 (OCR
 for scanned pages) and M4 (highlights and notes). See the README for details.
 
-Still to come: original-page view, Kokoro voices (M5), Ask AI (M6), and
-Google sign-in with sync (deferred from M0).
+Since then: Kokoro natural voices (M5), skip-clutter options, and listening
+extras (sleep timer, time left, words per minute).
+
+Still to come: Google sign-in with sync (next), original-page view, and Ask AI (M6).
 
 ## Decisions so far
 

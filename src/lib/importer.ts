@@ -19,7 +19,7 @@ export function paragraphsToPage(docId: string, page: number, paras: Paragraph[]
     docId,
     page,
     status: 'ready',
-    blocks: paras.map((p, i) => makeBlock(page, i, p.text, p.heading)),
+    blocks: paras.map((p, i) => makeBlock(page, i, p.text, p.heading, p.small)),
   };
 }
 

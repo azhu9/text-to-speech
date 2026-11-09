@@ -124,7 +124,8 @@ export function linesToParagraphs(lines: Line[]): Paragraph[] {
     .map((p) => {
       const text = joinLines(p.lines);
       const heading = p.h > h * 1.25 && text.length < 150 && !/[.!?]$/.test(text);
-      return heading ? { text, heading } : { text };
+      if (heading) return { text, heading };
+      return p.h < h * 0.85 ? { text, small: true } : { text };
     })
     .filter((p) => /[\p{L}\p{N}]/u.test(p.text));
 }

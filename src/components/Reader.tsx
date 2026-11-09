@@ -5,6 +5,7 @@ import { openLibrary } from '../lib/nav';
 import { ocr } from '../lib/ocr';
 import { buildItems, SpeechPlayer } from '../lib/player';
 import { blockOrder } from '../lib/segment';
+import { inlineSkips, loadSkipOptions, saveSkipOptions, SKIP_LABELS, skippedBlocks, type Range, type SkipOptions } from '../lib/skip';
 import { readSelection, type TextSelection } from '../lib/selection';
 import type { Annotation, Block, HighlightColor } from '../lib/types';
 import { BlockView } from './BlockView';
@@ -12,6 +13,7 @@ import { COLORS, NotesPanel } from './NotesPanel';
 import { PlayerBar } from './PlayerBar';
 
 const EMPTY: Annotation[] = [];
+const NO_RANGES: Range[] = [];
 const FONT_KEY = 'read-aloud:font-size';
 
 function annotationSortKey(a: Annotation): [number, number, number] {
@@ -46,13 +48,32 @@ export function Reader({ docId }: { docId: string }) {
   const [selectedAnn, setSelectedAnn] = useState<{ id: string; focusNote: boolean } | null>(null);
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [fontSize, setFontSize] = useState(loadFontSize);
+  const [skip, setSkip] = useState<SkipOptions>(loadSkipOptions);
+  const [showSkip, setShowSkip] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledAt = useRef(0);
   const initialized = useRef(false);
 
   const blocks = useMemo<Block[]>(() => (pages ?? []).flatMap((p) => p.blocks), [pages]);
-  const items = useMemo(() => buildItems(blocks), [blocks]);
+  const items = useMemo(() => buildItems(blocks, skip), [blocks, skip]);
+  const skippedIds = useMemo(() => skippedBlocks(blocks, skip), [blocks, skip]);
+  const skipRanges = useMemo(() => {
+    const m = new Map<string, Range[]>();
+    for (const b of blocks) {
+      const r = inlineSkips(b.text, skip);
+      if (r.length) m.set(b.id, r);
+    }
+    return m;
+  }, [blocks, skip]);
+  // wordsAfter[i] = words from sentence i to the end
+  const wordsAfter = useMemo(() => {
+    const out = new Array<number>(items.length + 1).fill(0);
+    for (let i = items.length - 1; i >= 0; i--) out[i] = out[i + 1] + items[i].words;
+    return out;
+  }, [items]);
+
+  useEffect(() => saveSkipOptions(skip), [skip]);
   const annotations = useMemo(() => [...(annotationsRaw ?? [])].sort(compareAnnotations), [annotationsRaw]);
   const annsByBlock = useMemo(() => {
     const m = new Map<string, Annotation[]>();
@@ -249,6 +270,32 @@ export function Reader({ docId }: { docId: string }) {
         )}
         {!!doc?.ocrPending && <span className="text-sm text-amber-700 dark:text-amber-400">Scanning text: {doc.ocrPending} pages left</span>}
         {failedPages > 0 && <span className="text-sm text-red-600">{failedPages} page(s) couldn't be read</span>}
+        <div className="relative">
+          <button
+            className={`rounded px-2 py-1 text-sm ${showSkip ? 'bg-stone-200 dark:bg-stone-800' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+            onClick={() => setShowSkip((v) => !v)}
+            aria-expanded={showSkip}
+          >
+            Skip
+          </button>
+          {showSkip && (
+            <div className="absolute right-0 z-30 mt-2 w-72 rounded-lg border border-stone-200 bg-white p-3 text-sm shadow-lg dark:border-stone-700 dark:bg-stone-900">
+              <p className="mb-2 font-medium">Don't read aloud</p>
+              {(Object.keys(SKIP_LABELS) as (keyof SkipOptions)[]).map((k) => (
+                <label key={k} className="flex cursor-pointer items-start gap-2 py-1">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-sky-600"
+                    checked={skip[k]}
+                    onChange={(e) => setSkip((o) => ({ ...o, [k]: e.target.checked }))}
+                  />
+                  <span>{SKIP_LABELS[k]}</span>
+                </label>
+              ))}
+              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">Skipped text stays visible in grey.</p>
+            </div>
+          )}
+        </div>
         <div className="flex items-center rounded border border-stone-200 dark:border-stone-700">
           <button className="px-2 py-1 text-sm" onClick={() => setFontSize((f) => Math.max(14, f - 2))} aria-label="Smaller text">
             A−
@@ -315,6 +362,8 @@ export function Reader({ docId }: { docId: string }) {
                         activeSentence={active ? current.sentence : -1}
                         word={active ? state.word : null}
                         annotations={annsByBlock.get(b.id) ?? EMPTY}
+                        skipped={skippedIds.has(b.id)}
+                        skips={skipRanges.get(b.id) ?? NO_RANGES}
                       />
                     );
                   })}
@@ -339,7 +388,7 @@ export function Reader({ docId }: { docId: string }) {
         )}
       </div>
 
-      <PlayerBar player={player} state={state} />
+      <PlayerBar player={player} state={state} wordsLeft={wordsAfter[state.index] ?? 0} />
 
       {selection && (
         <div

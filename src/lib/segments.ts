@@ -7,11 +7,18 @@ export interface Segment {
   sentence: number;
   annotations: Annotation[];
   word: boolean;
+  /** not read aloud (skip settings) */
+  skipped: boolean;
 }
 
 /** Split a block's text at every sentence, highlight and current-word boundary,
  * so each piece can be rendered as one span with the right styles. */
-export function buildSegments(block: Block, annotations: Annotation[], word: [number, number] | null): Segment[] {
+export function buildSegments(
+  block: Block,
+  annotations: Annotation[],
+  word: [number, number] | null,
+  skips: [number, number][] = [],
+): Segment[] {
   const len = block.text.length;
   const points = new Set<number>([0, len]);
   for (const [s, e] of block.sentences) points.add(s).add(e);
@@ -26,6 +33,7 @@ export function buildSegments(block: Block, annotations: Annotation[], word: [nu
           points.add(start).add(end);
         }
       }
+  for (const [a, b] of skips) points.add(Math.max(0, Math.min(len, a))).add(Math.max(0, Math.min(len, b)));
   if (word) points.add(Math.max(0, Math.min(len, word[0]))).add(Math.max(0, Math.min(len, word[1])));
   const sorted = [...points].sort((x, y) => x - y);
   const out: Segment[] = [];
@@ -43,6 +51,7 @@ export function buildSegments(block: Block, annotations: Annotation[], word: [nu
       sentence,
       annotations: ranges.filter((r) => r.start <= start && end <= r.end).map((r) => r.a),
       word: !!word && word[0] <= start && end <= word[1],
+      skipped: skips.some(([a, b]) => a <= start && end <= b),
     });
   }
   return out;
