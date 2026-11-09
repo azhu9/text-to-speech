@@ -7,6 +7,16 @@ notes and highlights. AI question-answering comes later.
 > Naming: this is our own app with similar features. We should give it its own
 > name and look and not reuse Speechify's name, logo or design.
 
+## Current status: MVP built (no sign-in)
+
+The first version runs entirely in the browser with no account. It covers
+M1 (text files read aloud), most of M2 (text PDFs; reflowed reader view
+with page markers instead of the original-page view), the core of M3 (OCR
+for scanned pages) and M4 (highlights and notes). See the README for details.
+
+Still to come: original-page view, Kokoro voices (M5), Ask AI (M6), and
+Google sign-in with sync (deferred from M0).
+
 ## Decisions so far
 
 | Question | Answer | What it changes |

@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Iowan Old Style", "Charter", "Georgia", ui-serif, serif;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100;
+}
+
+/* Highlight colours used by both text and the notes panel. */
+.hl-yellow { background-color: rgb(253 224 71 / 0.55); }
+.hl-green { background-color: rgb(134 239 172 / 0.6); }
+.hl-blue { background-color: rgb(147 197 253 / 0.6); }
+.hl-pink { background-color: rgb(249 168 212 / 0.6); }
+@media (prefers-color-scheme: dark) {
+  .hl-yellow { background-color: rgb(202 138 4 / 0.45); }
+  .hl-green { background-color: rgb(22 163 74 / 0.45); }
+  .hl-blue { background-color: rgb(37 99 235 / 0.45); }
+  .hl-pink { background-color: rgb(219 39 119 / 0.45); }
+}
+
+.reading-block {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 6rem;
+}
