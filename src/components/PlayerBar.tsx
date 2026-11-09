@@ -9,6 +9,8 @@ export function PlayerBar({ player, state }: { player: SpeechPlayer; state: Play
 
   useEffect(() => {
     player.setVoices(voices);
+    // Pick a good default if nothing is chosen, or the saved voice is gone
+    // (or is a novelty voice, which sortVoices leaves out).
     if (voices.length && !voices.some((v) => v.voiceURI === state.voiceURI)) {
       const v = defaultVoice(voices);
       if (v) player.setVoice(v.voiceURI);

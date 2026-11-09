@@ -33,6 +33,19 @@ export const clampRate = (r: number) => Math.round(Math.min(MAX_RATE, Math.max(M
 
 const SETTINGS_KEY = 'read-aloud:player';
 
+/** Wait this long after the last speed/voice change before speaking again. */
+const RESTART_DELAY_MS = 300;
+/** Pause after cancel() before speak(); Chrome can drop speech queued immediately. */
+const AFTER_CANCEL_MS = 120;
+/** If an utterance hasn't started by then, the engine is stuck. */
+const START_TIMEOUT_MS = 3000;
+const STALL_AFTER_WORD_MS = 4000;
+const MAX_RETRIES = 2;
+/** Typical speaking speed at rate 1, used to estimate how long a sentence takes. */
+const CHARS_PER_SEC = 14;
+const SENTENCE_PAUSE_MS = 250;
+const PARAGRAPH_PAUSE_MS = 600;
+
 function loadSettings(): { rate: number; voiceURI: string | null } {
   try {
     const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
@@ -66,6 +79,11 @@ export class SpeechPlayer {
   utterance: SpeechSynthesisUtterance | null = null;
   private voices: SpeechSynthesisVoice[] = [];
   private endedAtLast = false;
+  private cancelledAt = 0;
+  private restartTimer?: ReturnType<typeof setTimeout>;
+  private startTimer?: ReturnType<typeof setTimeout>;
+  private gapTimer?: ReturnType<typeof setTimeout>;
+  private watchdog?: ReturnType<typeof setInterval>;
   state: PlayerState;
 
   constructor() {
@@ -137,12 +155,14 @@ export class SpeechPlayer {
       this.endedAtLast = false;
       this.set({ index: 0 });
     }
+    clearTimeout(this.restartTimer);
     this.set({ playing: true, error: null });
     this.speakCurrent();
   }
 
   pause() {
-    this.resumeChar = this.lastWordChar;
+    clearTimeout(this.restartTimer);
+    if (this.utterance) this.resumeChar = this.lastWordChar;
     this.stopSpeech();
     this.set({ playing: false });
   }
@@ -159,7 +179,10 @@ export class SpeechPlayer {
     this.lastWordChar = char;
     this.endedAtLast = false;
     this.set({ index: i, word: null });
-    if (this.state.playing) this.speakCurrent();
+    if (this.state.playing) {
+      clearTimeout(this.restartTimer);
+      this.speakCurrent();
+    }
   }
 
   seekTo(pos: Position, play = false) {
@@ -181,35 +204,55 @@ export class SpeechPlayer {
 
   setRate(rate: number) {
     const r = clampRate(rate);
+    if (r === this.state.rate) return;
     this.set({ rate: r });
     saveSettings(r, this.state.voiceURI);
-    this.restartFromWord();
+    this.scheduleRestart();
   }
 
   setVoice(voiceURI: string | null) {
+    if (voiceURI === this.state.voiceURI) return;
     this.set({ voiceURI });
     saveSettings(this.state.rate, voiceURI);
-    this.restartFromWord();
+    this.scheduleRestart();
   }
 
   destroy() {
+    clearTimeout(this.restartTimer);
     this.stopSpeech();
     this.listeners.clear();
   }
 
-  private restartFromWord() {
+  /**
+   * Speed/voice changes arrive in bursts (dragging the slider). Stop speaking
+   * right away, but only start again once the changes settle: hammering
+   * cancel()+speak() is what jams Chrome's speech engine.
+   */
+  private scheduleRestart() {
     if (!this.state.playing) return;
-    this.resumeChar = this.lastWordChar;
-    this.speakCurrent();
+    if (this.utterance) this.resumeChar = this.lastWordChar;
+    this.stopSpeech();
+    clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      if (this.state.playing) this.speakCurrent();
+    }, RESTART_DELAY_MS);
   }
 
   private stopSpeech() {
     this.token++;
     this.utterance = null;
-    if (SpeechPlayer.supported) window.speechSynthesis.cancel();
+    clearTimeout(this.startTimer);
+    clearTimeout(this.gapTimer);
+    clearInterval(this.watchdog);
+    if (!SpeechPlayer.supported) return;
+    const synth = window.speechSynthesis;
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+      this.cancelledAt = Date.now();
+    }
   }
 
-  private speakCurrent() {
+  private speakCurrent(attempt = 0) {
     this.stopSpeech();
     const t = this.token;
     const item = this.current;
@@ -225,6 +268,7 @@ export class SpeechPlayer {
       this.advance(t);
       return;
     }
+    const synth = window.speechSynthesis;
     const u = new SpeechSynthesisUtterance(text);
     const voice = this.voices.find((v) => v.voiceURI === this.state.voiceURI);
     if (voice) {
@@ -232,8 +276,21 @@ export class SpeechPlayer {
       u.lang = voice.lang;
     }
     u.rate = this.state.rate;
+
+    let started = false;
+    let sawBoundary = false;
+    let lastEvent = 0;
+    const startedAt = { at: 0 };
+
+    u.onstart = () => {
+      if (t !== this.token) return;
+      started = true;
+      lastEvent = startedAt.at = Date.now();
+    };
     u.onboundary = (e) => {
       if (t !== this.token || (e.name && e.name !== 'word')) return;
+      started = sawBoundary = true;
+      lastEvent = Date.now();
       const s = from + e.charIndex;
       const len = e.charLength || /^[^\s]+/.exec(item.text.slice(s))?.[0].length || 0;
       this.lastWordChar = s;
@@ -244,22 +301,89 @@ export class SpeechPlayer {
     };
     u.onerror = (e) => {
       if (t !== this.token || e.error === 'interrupted' || e.error === 'canceled') return;
-      this.set({ playing: false, error: `Speech error: ${e.error}` });
+      if (attempt < MAX_RETRIES) {
+        this.resumeChar = this.lastWordChar;
+        this.cancelledAt = Date.now();
+        this.speakCurrent(attempt + 1);
+      } else {
+        this.set({ playing: false, error: `Speech error: ${e.error}. Press play to try again.` });
+      }
     };
     this.utterance = u; // keep a reference: Chrome can drop events of GC'd utterances
     this.set({ word: from ? this.state.word : null });
-    window.speechSynthesis.speak(u);
+
+    // Rough upper bound for how long this chunk should take to say.
+    const expectedMs = (text.length / (CHARS_PER_SEC * this.state.rate)) * 1000;
+    const keepAlive = !!voice && /^Google/i.test(voice.name) && !voice.localService;
+    let lastKeepAlive = Date.now();
+
+    const begin = () => {
+      if (t !== this.token) return;
+      if (synth.paused) synth.resume(); // a paused engine silently queues everything
+      synth.speak(u);
+      const queuedAt = Date.now();
+      this.watchdog = setInterval(() => {
+        if (t !== this.token) return;
+        const now = Date.now();
+        if (!started) {
+          // Engine never started this utterance: it's jammed. Kick it and retry once.
+          if (now - queuedAt > START_TIMEOUT_MS) {
+            this.resumeChar = from;
+            if (attempt < MAX_RETRIES) {
+              synth.cancel();
+              this.cancelledAt = Date.now();
+              this.speakCurrent(attempt + 1);
+            } else {
+              this.stopSpeech();
+              this.set({ playing: false, error: 'The speech engine stopped responding. Press play to try again.' });
+            }
+          }
+          return;
+        }
+        // Chrome's online Google voices go silent after ~15 s unless nudged.
+        if (keepAlive && now - lastKeepAlive > 10_000 && synth.speaking) {
+          synth.pause();
+          synth.resume();
+          lastKeepAlive = now;
+        }
+        // Started but no end event long after it should have finished: stalled.
+        const quiet = now - lastEvent;
+        const limit = sawBoundary ? STALL_AFTER_WORD_MS + expectedMs * 0.5 : expectedMs * 2 + STALL_AFTER_WORD_MS;
+        if (quiet > limit) {
+          if (sawBoundary && attempt < MAX_RETRIES) {
+            this.resumeChar = this.lastWordChar;
+            this.speakCurrent(attempt + 1);
+          } else {
+            this.advance(t);
+          }
+        }
+      }, 500);
+    };
+    // Give the engine a moment after a cancel() before queueing new speech.
+    const sinceCancel = Date.now() - this.cancelledAt;
+    if (sinceCancel < AFTER_CANCEL_MS) this.startTimer = setTimeout(begin, AFTER_CANCEL_MS - sinceCancel);
+    else begin();
   }
 
   private advance(t: number) {
     if (t !== this.token) return;
+    clearInterval(this.watchdog);
+    this.utterance = null;
     this.lastWordChar = 0;
-    if (this.state.index + 1 < this.items.length) {
-      this.set({ index: this.state.index + 1, word: null });
-      this.speakCurrent();
-    } else {
+    const cur = this.current;
+    const next = this.items[this.state.index + 1];
+    if (!next) {
       this.endedAtLast = true;
       this.set({ playing: false, word: null });
+      return;
     }
+    // Breathe between sentences, a bit longer between paragraphs.
+    const base = cur && next.blockId !== cur.blockId ? PARAGRAPH_PAUSE_MS : SENTENCE_PAUSE_MS;
+    const gap = base / Math.sqrt(Math.max(1, this.state.rate));
+    // Move the position now, so pausing during the gap resumes at the next sentence.
+    this.set({ index: this.state.index + 1, word: null });
+    this.gapTimer = setTimeout(() => {
+      if (t === this.token) this.speakCurrent();
+    }, gap);
   }
 }

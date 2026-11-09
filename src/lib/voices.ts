@@ -1,19 +1,42 @@
 import { useEffect, useState } from 'react';
 
-/** Voices that tend to sound most natural get listed first. */
+/** macOS/iOS novelty and effect voices: fine as jokes, wrong for reading. */
+const NOVELTY = new Set(
+  [
+    'Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Deranged', 'Good News',
+    'Hysterical', 'Jester', 'Junior', 'Organ', 'Pipe Organ', 'Princess', 'Ralph', 'Superstar',
+    'Trinoids', 'Whisper', 'Wobble', 'Zarvox', 'Fred', 'Kathy',
+  ].map((n) => n.toLowerCase()),
+);
+
+/** Older, robotic-sounding engines (macOS "Eloquence" voices, eSpeak on Linux). */
+const ROBOTIC = /^(eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b|espeak/i;
+
+/** Voices known to sound natural. */
+const GOOD = /natural|neural|premium|enhanced|siri|^google|^(samantha|alex|daniel|karen|moira|tessa|serena|ava|allison|susan|tom|nicky|aaron|evan|zoe)\b/i;
+
+const baseName = (v: SpeechSynthesisVoice) => v.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase();
+
+export function isNovelty(v: SpeechSynthesisVoice): boolean {
+  return NOVELTY.has(baseName(v));
+}
+
 function score(v: SpeechSynthesisVoice): number {
   const n = v.name.toLowerCase();
   let s = 0;
-  if (n.includes('natural') || n.includes('neural')) s += 4;
-  if (n.includes('online')) s += 2;
-  if (n.includes('google')) s += 2;
-  if (n.includes('premium') || n.includes('enhanced')) s += 2;
-  if (v.lang.toLowerCase().startsWith('en')) s += 1;
+  if (n.includes('natural') || n.includes('neural')) s += 6;
+  if (n.includes('premium') || n.includes('enhanced')) s += 5;
+  if (GOOD.test(v.name)) s += 3;
+  if (v.default) s += 2;
+  if (ROBOTIC.test(v.name)) s -= 6;
   return s;
 }
 
+/** Usable voices, best-sounding first. Novelty voices are left out. */
 export function sortVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
-  return [...voices].sort((a, b) => score(b) - score(a) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+  return voices
+    .filter((v) => !isNovelty(v))
+    .sort((a, b) => score(b) - score(a) || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
 }
 
 export function useVoices(): SpeechSynthesisVoice[] {
@@ -34,8 +57,14 @@ export function useVoices(): SpeechSynthesisVoice[] {
   return voices;
 }
 
-/** Best default when the user hasn't picked one: a natural-sounding voice in their language. */
-export function defaultVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
-  const lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
-  return voices.find((v) => v.lang.toLowerCase().startsWith(lang)) ?? voices.find((v) => v.default) ?? voices[0];
+const userLang = () => (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US').toLowerCase();
+
+/** Best default: a natural-sounding voice in the user's language and region,
+ * else their language, else the system default. Expects sortVoices() output. */
+export function defaultVoice(voices: SpeechSynthesisVoice[], lang = userLang()): SpeechSynthesisVoice | undefined {
+  const l = lang.toLowerCase();
+  const short = l.slice(0, 2);
+  const exact = voices.filter((v) => v.lang.toLowerCase().replace('_', '-') === l);
+  const same = voices.filter((v) => v.lang.toLowerCase().startsWith(short));
+  return exact[0] ?? same[0] ?? voices.find((v) => v.default) ?? voices[0];
 }
