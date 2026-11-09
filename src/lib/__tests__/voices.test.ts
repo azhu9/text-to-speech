@@ -33,3 +33,16 @@ describe('voices', () => {
     expect(defaultVoice(sortVoices(mac), 'fr-FR')?.name).toBe('Thomas');
   });
 });
+
+describe('engineRate', () => {
+  it('softens speed only for online Google voices', async () => {
+    const { engineRate } = await import('../player');
+    const google = v('Google US English', 'en-US', { localService: false });
+    const local = v('Samantha');
+    expect(engineRate(local, 2)).toBe(2);
+    expect(engineRate(google, 1)).toBe(1);
+    expect(engineRate(google, 2)).toBeCloseTo(1.35);
+    expect(engineRate(google, 4)).toBeLessThanOrEqual(1.8);
+    expect(engineRate(google, 0.7)).toBe(0.7);
+  });
+});

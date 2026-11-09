@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { clampRate, MAX_RATE, MIN_RATE, type PlayerState, type SpeechPlayer } from '../lib/player';
+import { clampRate, isGoogleOnlineVoice, MAX_RATE, MIN_RATE, type PlayerState, type SpeechPlayer } from '../lib/player';
 import { defaultVoice, useVoices } from '../lib/voices';
 
 const PRESETS = [1, 1.5, 2, 2.5, 3];
@@ -123,6 +123,11 @@ export function PlayerBar({ player, state }: { player: SpeechPlayer; state: Play
           {state.total ? `${state.index + 1} / ${state.total}` : ''}
         </span>
       </div>
+      {state.rate > 1.2 && isGoogleOnlineVoice(voices.find((v) => v.voiceURI === state.voiceURI)) && (
+        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+          Google voices get hard to understand when sped up. For fast listening, pick a Microsoft or Apple voice.
+        </p>
+      )}
       {state.error && <p className="mt-1 text-sm text-red-600">{state.error}</p>}
     </div>
   );

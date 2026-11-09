@@ -27,6 +27,18 @@ export function buildItems(blocks: Block[]): PlayItem[] {
   return items;
 }
 
+/** Chrome's online Google voices speed up far more than the rate suggests and
+ * run words together above ~1.3x, so they get a gentler curve. */
+export function isGoogleOnlineVoice(v: SpeechSynthesisVoice | undefined): boolean {
+  return !!v && /^Google/i.test(v.name) && !v.localService;
+}
+
+/** The rate actually given to the speech engine for a chosen speed. */
+export function engineRate(voice: SpeechSynthesisVoice | undefined, speed: number): number {
+  if (!isGoogleOnlineVoice(voice) || speed <= 1) return speed;
+  return Math.min(1.8, 1 + (speed - 1) * 0.35);
+}
+
 export const MIN_RATE = 0.5;
 export const MAX_RATE = 4;
 export const clampRate = (r: number) => Math.round(Math.min(MAX_RATE, Math.max(MIN_RATE, r)) * 10) / 10;
@@ -111,6 +123,10 @@ export class SpeechPlayer {
 
   setVoices(voices: SpeechSynthesisVoice[]) {
     this.voices = voices;
+  }
+
+  get voice(): SpeechSynthesisVoice | undefined {
+    return this.voices.find((v) => v.voiceURI === this.state.voiceURI);
   }
 
   get current(): PlayItem | undefined {
@@ -275,7 +291,7 @@ export class SpeechPlayer {
       u.voice = voice;
       u.lang = voice.lang;
     }
-    u.rate = this.state.rate;
+    u.rate = engineRate(voice, this.state.rate);
 
     let started = false;
     let sawBoundary = false;
@@ -313,8 +329,8 @@ export class SpeechPlayer {
     this.set({ word: from ? this.state.word : null });
 
     // Rough upper bound for how long this chunk should take to say.
-    const expectedMs = (text.length / (CHARS_PER_SEC * this.state.rate)) * 1000;
-    const keepAlive = !!voice && /^Google/i.test(voice.name) && !voice.localService;
+    const expectedMs = (text.length / (CHARS_PER_SEC * Math.min(this.state.rate, u.rate * 1.5))) * 1000;
+    const keepAlive = isGoogleOnlineVoice(voice);
     let lastKeepAlive = Date.now();
 
     const begin = () => {
