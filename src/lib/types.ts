@@ -23,6 +23,8 @@ export interface PageRecord {
   page: number;
   status: PageStatus;
   blocks: Block[];
+  /** set when the change still has to be synced */
+  dirty?: number;
 }
 
 export type DocKind = 'pdf' | 'txt' | 'md';
@@ -47,6 +49,8 @@ export interface DocRecord {
   progress: number;
   /** the user's own skip choices for this document */
   rules?: DocRules;
+  /** set when the change still has to be synced */
+  dirty?: number;
 }
 
 export interface DocRules {
@@ -75,4 +79,6 @@ export interface Annotation {
   note: string;
   createdAt: number;
   updatedAt: number;
+  /** set when the change still has to be synced */
+  dirty?: number;
 }

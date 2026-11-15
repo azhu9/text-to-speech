@@ -1,3 +1,4 @@
+import { saveSetting } from './settingsSync';
 import type { SpokenText } from './skip';
 
 export interface Pronunciation {
@@ -22,11 +23,7 @@ export function loadPronunciations(): Pronunciation[] {
 }
 
 export function savePronunciations(list: Pronunciation[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
+  saveSetting(KEY, list);
 }
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

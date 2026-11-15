@@ -3,6 +3,7 @@ import type { RecognizeResult, Worker as TesseractWorker } from 'tesseract.js';
 import { db } from './db';
 import { paragraphsToPage } from './importer';
 import { openPdf, renderPage } from './pdf';
+import { sync } from './sync';
 import { linesToParagraphs, markMarginBand, type Line } from './pdfLayout';
 import { isPageNumber, textToParagraphs, type Paragraph } from './textImport';
 
@@ -118,10 +119,11 @@ class OcrRunner {
 
   private async getPdf(docId: string): Promise<PDFDocumentProxy | null> {
     if (this.pdfCache?.docId === docId) return this.pdfCache.pdf;
-    const file = await db.files.get(docId);
-    if (!file) return null;
+    // From this device, or downloaded from the cloud when signed in elsewhere.
+    const blob = await sync.loadFile(docId);
+    if (!blob) return null;
     if (this.pdfCache) await this.pdfCache.pdf.destroy();
-    const pdf = await openPdf(file.blob);
+    const pdf = await openPdf(blob);
     this.pdfCache = { docId, pdf };
     return pdf;
   }

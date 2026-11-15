@@ -1,6 +1,7 @@
 import { db, newId } from './db';
 import { extractPdf } from './pdf';
 import { makeBlock } from './segment';
+import { sync } from './sync';
 import { markdownToParagraphs, textToParagraphs, type Paragraph } from './textImport';
 import type { DocKind, DocRecord, PageRecord } from './types';
 
@@ -73,9 +74,9 @@ export async function importFile(file: File, onProgress?: (msg: string) => void)
  * Highlights are kept but may shift slightly if paragraph breaks changed.
  */
 export async function reextractPdf(docId: string, onProgress?: (msg: string) => void): Promise<void> {
-  const [doc, file] = await Promise.all([db.docs.get(docId), db.files.get(docId)]);
-  if (!doc || doc.kind !== 'pdf' || !file) throw new Error('Original PDF not found for this document.');
-  const pdf = await extractPdf(file.blob, (d, t) => onProgress?.(`Reading page ${d} of ${t}…`));
+  const [doc, blob] = await Promise.all([db.docs.get(docId), sync.loadFile(docId)]);
+  if (!doc || doc.kind !== 'pdf' || !blob) throw new Error('Original PDF not found for this document.');
+  const pdf = await extractPdf(blob, (d, t) => onProgress?.(`Reading page ${d} of ${t}…`));
   const old = new Map((await db.pages.where('docId').equals(docId).toArray()).map((p) => [p.page, p]));
   const pages: PageRecord[] = pdf.pages.map((paras, i) => {
     const n = i + 1;

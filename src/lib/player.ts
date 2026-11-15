@@ -3,6 +3,7 @@ import type { SpeechEngine, Utterance } from './engines/types';
 import { WebSpeechEngine } from './engines/webSpeech';
 import { applyPronunciations, type Pronunciation } from './pronounce';
 import { applySkips, inlineSkips, skippedBlocks, type SkipOptions } from './skip';
+import { saveSetting } from './settingsSync';
 import type { Block, Position } from './types';
 
 export { engineRate, isGoogleOnlineVoice } from './engines/webSpeech';
@@ -103,11 +104,7 @@ function loadSettings(): { rate: number; voiceURI: string | null } {
 }
 
 function saveSettings(rate: number, voiceURI: string | null) {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ rate, voiceURI }));
-  } catch {
-    /* storage unavailable */
-  }
+  saveSetting(SETTINGS_KEY, { rate, voiceURI });
 }
 
 /**

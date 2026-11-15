@@ -1,3 +1,4 @@
+import { saveSetting } from './settingsSync';
 import { isPageNumber } from './textImport';
 import type { Block, DocRules } from './types';
 
@@ -224,11 +225,7 @@ export function loadSkipOptions(): SkipOptions {
 }
 
 export function saveSkipOptions(o: SkipOptions) {
-  try {
-    localStorage.setItem(SKIP_KEY, JSON.stringify(o));
-  } catch {
-    /* ignore */
-  }
+  saveSetting(SKIP_KEY, o);
 }
 
 /** Do two paragraphs look like the same kind of text (e.g. the same footer)? */
@@ -270,9 +267,5 @@ export function loadGlobalPatterns(): string[] {
 }
 
 export function saveGlobalPatterns(p: string[]) {
-  try {
-    localStorage.setItem(GLOBAL_PATTERNS_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
+  saveSetting(GLOBAL_PATTERNS_KEY, p);
 }

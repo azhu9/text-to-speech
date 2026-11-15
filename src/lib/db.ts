@@ -4,13 +4,31 @@ import type { Annotation, DocRecord, PageRecord } from './types';
 export interface FileRecord {
   docId: string;
   blob: Blob;
+  /** set when the change still has to be synced */
+  dirty?: number;
 }
+
+/** Something deleted on this device that still has to be deleted in the cloud. */
+export interface Tombstone {
+  kind: SyncKind;
+  key: string;
+  at: number;
+}
+
+export interface MetaRecord {
+  key: string;
+  value: unknown;
+}
+
+export type SyncKind = 'docs' | 'pages' | 'annotations' | 'files';
 
 class AppDB extends Dexie {
   docs!: Table<DocRecord, string>;
   pages!: Table<PageRecord, [string, number]>;
   files!: Table<FileRecord, string>;
   annotations!: Table<Annotation, string>;
+  tombstones!: Table<Tombstone, [SyncKind, string]>;
+  meta!: Table<MetaRecord, string>;
 
   constructor() {
     super('read-aloud');
@@ -19,6 +37,15 @@ class AppDB extends Dexie {
       pages: '[docId+page], docId, status',
       files: 'docId',
       annotations: 'id, docId',
+    });
+    // v2: cloud sync. `dirty` marks records changed since the last sync.
+    this.version(2).stores({
+      docs: 'id, openedAt, dirty',
+      pages: '[docId+page], docId, status, dirty',
+      files: 'docId, dirty',
+      annotations: 'id, docId, dirty',
+      tombstones: '[kind+key]',
+      meta: 'key',
     });
   }
 }

@@ -4,8 +4,9 @@ A personal read-aloud app: open PDFs (including scanned textbooks) and text
 files, listen at any speed in a choice of voices with follow-along
 highlighting, and keep highlights and notes.
 
-**MVP:** no sign-in, no server. Everything, including your files, notes and
-reading positions, is stored in this browser (IndexedDB).
+Works without an account: everything, including your files, notes and reading
+positions, is stored in this browser (IndexedDB). Optional **Google sign-in**
+syncs your library across computers. See [docs/SIGN_IN_SETUP.md](docs/SIGN_IN_SETUP.md).
 
 See [docs/SCOPE.md](docs/SCOPE.md) for the full plan and roadmap.
 
@@ -66,6 +67,9 @@ Other commands: `npm test` (unit tests), `npm run build` (production build in `d
   note, or start listening from there. Notes sidebar, click a note to jump
   to it, export everything as Markdown.
 - **Library:** progress per document, OCR status, rename, delete, storage used.
+- **Sign in with Google (optional):** syncs documents, extracted/OCR text,
+  positions, highlights, notes, skip choices, pronunciations, queue and voice
+  settings; backs up PDFs. Local-first: works offline, syncs in the background.
 
 ## Voices
 
@@ -109,6 +113,9 @@ src/
     engines/        webSpeech.ts (browser voices), kokoro.ts + kokoro.worker.ts (natural voices)
     skip.ts         skip-clutter rules
     db.ts           IndexedDB storage (Dexie)
+    sync.ts         local-first sync engine (change tracking, push/pull, tombstones)
+    cloud.ts        Supabase client, Google sign-in, remote adapter
+supabase/schema.sql   database table, security rules and file bucket for sync
   components/       Library, Reader, PlayerBar, NotesPanel, BlockView
 scripts/copy-assets.mjs   copies the OCR engine, English data and ONNX runtime into public/
 ```

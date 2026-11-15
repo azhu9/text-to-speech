@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { saveSetting, SETTINGS_EVENT } from './settingsSync';
 
 /** Documents to play next, in order (stored in this browser). */
 const KEY = 'read-aloud:queue';
@@ -17,13 +18,19 @@ let cache = read();
 
 function write(ids: string[]) {
   cache = [...new Set(ids)];
-  try {
-    localStorage.setItem(KEY, JSON.stringify(cache));
-  } catch {
-    /* ignore */
-  }
+  saveSetting(KEY, cache);
   listeners.forEach((l) => l());
 }
+
+// The queue changed on another device.
+if (typeof window !== 'undefined')
+  window.addEventListener(SETTINGS_EVENT, (e) => {
+    const d = (e as CustomEvent).detail;
+    if (d?.key === KEY && !d.local) {
+      cache = read();
+      listeners.forEach((l) => l());
+    }
+  });
 
 export const queue = {
   get: () => cache,

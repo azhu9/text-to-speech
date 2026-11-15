@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { db, newId } from '../lib/db';
 import { updateBlockText } from '../lib/importer';
 import { loadPronunciations, savePronunciations, type Pronunciation } from '../lib/pronounce';
+import { SETTINGS_EVENT } from '../lib/settingsSync';
 import { openDoc, openLibrary } from '../lib/nav';
 import { queue, useQueue } from '../lib/queue';
 import { ocr } from '../lib/ocr';
@@ -125,6 +126,18 @@ export function Reader({ docId, autoplay = false }: { docId: string; autoplay?: 
   }, [items]);
 
   useEffect(() => saveSkipOptions(skip), [skip]);
+  // Settings changed on another device and just synced down.
+  useEffect(() => {
+    const onRemote = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.local) return;
+      if (d?.key === 'read-aloud:skip') setSkip(loadSkipOptions());
+      if (d?.key === 'read-aloud:skip-patterns') setGlobalPatterns(loadGlobalPatterns());
+      if (d?.key === 'read-aloud:pronunciations') setPronunciations(loadPronunciations());
+    };
+    window.addEventListener(SETTINGS_EVENT, onRemote);
+    return () => window.removeEventListener(SETTINGS_EVENT, onRemote);
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem(PANEL_KEY, panel ?? 'closed');

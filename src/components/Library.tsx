@@ -1,6 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
+import { useAuth } from '../lib/cloud';
 import { db, deleteDoc } from '../lib/db';
+import { AccountBar } from './AccountBar';
 import { ACCEPT, importFile, kindOf, reextractPdf } from '../lib/importer';
 import { openDoc } from '../lib/nav';
 import { queue, useQueue } from '../lib/queue';
@@ -22,6 +24,7 @@ export function Library() {
   const [ocrStatus, setOcrStatus] = useState<OcrStatus>({ running: false });
   const input = useRef<HTMLInputElement>(null);
   const queued = useQueue();
+  const signedIn = !!useAuth().session;
   const byId = new Map((docs ?? []).map((d) => [d.id, d]));
   const queuedDocs = queued.map((id) => byId.get(id)).filter((d): d is DocRecord => !!d);
 
@@ -72,7 +75,12 @@ export function Library() {
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Read Aloud</h1>
-          <p className="mt-1 text-stone-500 dark:text-stone-400">Your library. Everything stays in this browser.</p>
+          <p className="mt-1 text-stone-500 dark:text-stone-400">
+            {signedIn ? 'Your library, synced to your Google account.' : 'Your library. Everything stays in this browser.'}
+          </p>
+        </div>
+        <div className="ml-auto">
+          <AccountBar />
         </div>
         <button
           className="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"

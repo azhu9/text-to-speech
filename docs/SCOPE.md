@@ -17,7 +17,11 @@ for scanned pages) and M4 (highlights and notes). See the README for details.
 Since then: Kokoro natural voices (M5), skip-clutter options, and listening
 extras (sleep timer, time left, words per minute).
 
-Still to come: Google sign-in with sync (next), original-page view, and Ask AI (M6).
+Also added: cleanup of headers/footers/notices, paragraph skip rules, text
+editing, pronunciations, contents/search panel, listening queue, and optional
+Google sign-in with sync via Supabase (setup: docs/SIGN_IN_SETUP.md).
+
+Still to come: original-page view, MP3 export, and Ask AI (M6).
 
 ## Decisions so far
 
