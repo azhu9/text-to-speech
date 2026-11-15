@@ -12,6 +12,8 @@ export interface Block {
   small?: boolean;
   /** header, footer, page number or margin notice (marked at import) */
   margin?: boolean;
+  /** text was corrected by the user */
+  edited?: boolean;
 }
 
 export type PageStatus = 'ready' | 'ocr-pending' | 'ocr-failed';
@@ -43,6 +45,17 @@ export interface DocRecord {
   position?: Position;
   /** 0..1 */
   progress: number;
+  /** the user's own skip choices for this document */
+  rules?: DocRules;
+}
+
+export interface DocRules {
+  /** paragraphs the user chose not to hear */
+  skip?: string[];
+  /** paragraphs to read even though they'd be skipped automatically */
+  read?: string[];
+  /** example texts: skip every paragraph similar to one of these */
+  patterns?: string[];
 }
 
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';

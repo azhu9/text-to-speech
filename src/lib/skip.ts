@@ -1,5 +1,5 @@
 import { isPageNumber } from './textImport';
-import type { Block } from './types';
+import type { Block, DocRules } from './types';
 
 export interface SkipOptions {
   /** running headers/footers, page numbers, "Distributed by…" notices */
@@ -76,7 +76,7 @@ const LINK_LINE = /https?:\/\/|www\.|doi\.org|doi:/i;
 
 /** Letter pairs of the text, ignoring digits, spaces and punctuation, so
  * page numbers and OCR slips ("BI0LOGY") barely matter. */
-function bigrams(s: string): Map<string, number> {
+export function bigrams(s: string): Map<string, number> {
   const t = s.toLowerCase().replace(/[^\p{L}]+/gu, '');
   const m = new Map<string, number>();
   for (let i = 0; i < t.length - 1; i++) {
@@ -93,7 +93,7 @@ function bigramCount(m: Map<string, number>): number {
 }
 
 /** Dice similarity of letter pairs (0..1). */
-function similar(a: Map<string, number>, b: Map<string, number>): boolean {
+export function similar(a: Map<string, number>, b: Map<string, number>): boolean {
   const na = bigramCount(a);
   const nb = bigramCount(b);
   if (na < 3 || nb < 3) return false;
@@ -226,6 +226,52 @@ export function loadSkipOptions(): SkipOptions {
 export function saveSkipOptions(o: SkipOptions) {
   try {
     localStorage.setItem(SKIP_KEY, JSON.stringify(o));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Do two paragraphs look like the same kind of text (e.g. the same footer)? */
+export function looksAlike(a: Map<string, number>, b: Map<string, number>, aText: string, bText: string): boolean {
+  if (similar(a, b)) return true;
+  // Very short texts: compare letters exactly.
+  const la = aText.toLowerCase().replace(/[^\p{L}]+/gu, '');
+  return la.length > 0 && la.length < 6 && la === bText.toLowerCase().replace(/[^\p{L}]+/gu, '');
+}
+
+/**
+ * Final set of skipped paragraphs: automatic choices (`auto`) adjusted by the
+ * user's per-document rules and their "skip everything like this" patterns.
+ */
+export function applyUserRules(blocks: Block[], auto: Set<string>, rules: DocRules | undefined, globalPatterns: string[] = []): Set<string> {
+  const out = new Set(auto);
+  const patterns = [...(rules?.patterns ?? []), ...globalPatterns].map((t) => ({ t, g: bigrams(t) }));
+  if (patterns.length)
+    for (const b of blocks) {
+      if (out.has(b.id) || b.text.length > 600) continue;
+      const g = bigrams(b.text);
+      if (patterns.some((p) => looksAlike(g, p.g, b.text, p.t))) out.add(b.id);
+    }
+  for (const id of rules?.skip ?? []) out.add(id);
+  for (const id of rules?.read ?? []) out.delete(id);
+  return out;
+}
+
+const GLOBAL_PATTERNS_KEY = 'read-aloud:skip-patterns';
+
+/** "Skip everything like this" patterns that apply to every document. */
+export function loadGlobalPatterns(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(GLOBAL_PATTERNS_KEY) ?? '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveGlobalPatterns(p: string[]) {
+  try {
+    localStorage.setItem(GLOBAL_PATTERNS_KEY, JSON.stringify(p));
   } catch {
     /* ignore */
   }

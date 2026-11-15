@@ -9,6 +9,8 @@ export interface Segment {
   word: boolean;
   /** not read aloud (skip settings) */
   skipped: boolean;
+  /** matches the current search */
+  mark: boolean;
 }
 
 /** Split a block's text at every sentence, highlight and current-word boundary,
@@ -18,6 +20,7 @@ export function buildSegments(
   annotations: Annotation[],
   word: [number, number] | null,
   skips: [number, number][] = [],
+  marks: [number, number][] = [],
 ): Segment[] {
   const len = block.text.length;
   const points = new Set<number>([0, len]);
@@ -33,6 +36,7 @@ export function buildSegments(
           points.add(start).add(end);
         }
       }
+  for (const [a, b] of marks) points.add(Math.max(0, Math.min(len, a))).add(Math.max(0, Math.min(len, b)));
   for (const [a, b] of skips) points.add(Math.max(0, Math.min(len, a))).add(Math.max(0, Math.min(len, b)));
   if (word) points.add(Math.max(0, Math.min(len, word[0]))).add(Math.max(0, Math.min(len, word[1])));
   const sorted = [...points].sort((x, y) => x - y);
@@ -52,6 +56,7 @@ export function buildSegments(
       annotations: ranges.filter((r) => r.start <= start && end <= r.end).map((r) => r.a),
       word: !!word && word[0] <= start && end <= word[1],
       skipped: skips.some(([a, b]) => a <= start && end <= b),
+      mark: marks.some(([a, b]) => a <= start && end <= b),
     });
   }
   return out;

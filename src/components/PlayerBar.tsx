@@ -19,7 +19,17 @@ function formatClock(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function PlayerBar({ player, state, wordsLeft }: { player: SpeechPlayer; state: PlayerState; wordsLeft: number }) {
+export function PlayerBar({
+  player,
+  state,
+  wordsLeft,
+  upNext,
+}: {
+  player: SpeechPlayer;
+  state: PlayerState;
+  wordsLeft: number;
+  upNext?: { title: string; onPlay: () => void };
+}) {
   const voices = useVoices();
   const kStatus = useSyncExternalStore(kokoro.subscribe, kokoro.getStatus);
   const usingKokoro = isKokoroVoice(state.voiceURI);
@@ -204,6 +214,14 @@ export function PlayerBar({ player, state, wordsLeft }: { player: SpeechPlayer; 
         {status && (
           <span className={status.tone === 'error' ? 'text-red-600' : status.tone === 'warn' ? 'text-amber-700 dark:text-amber-400' : 'text-sky-700 dark:text-sky-400'}>
             {status.text}
+          </span>
+        )}
+        {upNext && (
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="truncate">{state.ended ? 'Starting next' : 'Up next'}: {upNext.title}</span>
+            <button className="shrink-0 text-sky-700 hover:underline dark:text-sky-400" onClick={upNext.onPlay}>
+              Play now
+            </button>
           </span>
         )}
         <span className="ml-auto">{state.total ? `${state.index + 1} / ${state.total}` : ''}</span>

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { db, deleteDoc } from '../lib/db';
 import { ACCEPT, importFile, kindOf, reextractPdf } from '../lib/importer';
 import { openDoc } from '../lib/nav';
+import { queue, useQueue } from '../lib/queue';
 import { ocr, type OcrStatus } from '../lib/ocr';
 import type { DocRecord } from '../lib/types';
 
@@ -20,6 +21,9 @@ export function Library() {
   const [usage, setUsage] = useState<string | null>(null);
   const [ocrStatus, setOcrStatus] = useState<OcrStatus>({ running: false });
   const input = useRef<HTMLInputElement>(null);
+  const queued = useQueue();
+  const byId = new Map((docs ?? []).map((d) => [d.id, d]));
+  const queuedDocs = queued.map((id) => byId.get(id)).filter((d): d is DocRecord => !!d);
 
   useEffect(() => ocr.subscribe(setOcrStatus), []);
   useEffect(() => {
@@ -114,12 +118,50 @@ export function Library() {
         <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">Scanned PDFs are converted to text automatically (OCR).</p>
       </div>
 
+      {queuedDocs.length > 0 && (
+        <section className="mb-8 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900" aria-label="Up next">
+          <div className="mb-2 flex items-center gap-3">
+            <h2 className="font-semibold">Up next</h2>
+            <span className="text-sm text-stone-500 dark:text-stone-400">Plays one after another, from where you left off.</span>
+            <button
+              className="ml-auto rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
+              onClick={() => {
+                const first = queue.takeNext('');
+                if (first) openDoc(first, { autoplay: true });
+              }}
+            >
+              ▶ Play queue
+            </button>
+            <button className="text-sm text-stone-500 hover:text-red-600" onClick={() => queue.clear()}>
+              Clear
+            </button>
+          </div>
+          <ol className="space-y-1">
+            {queuedDocs.map((d, i) => (
+              <li key={d.id} className="flex items-center gap-2 text-sm">
+                <span className="w-5 text-right text-stone-400 tabular-nums">{i + 1}.</span>
+                <span className="min-w-0 flex-1 truncate">{d.title}</span>
+                <button className="px-1 text-stone-500 hover:text-stone-900 disabled:opacity-30 dark:hover:text-stone-100" disabled={i === 0} onClick={() => queue.move(d.id, -1)} aria-label={`Move ${d.title} up`}>
+                  ↑
+                </button>
+                <button className="px-1 text-stone-500 hover:text-stone-900 disabled:opacity-30 dark:hover:text-stone-100" disabled={i === queuedDocs.length - 1} onClick={() => queue.move(d.id, 1)} aria-label={`Move ${d.title} down`}>
+                  ↓
+                </button>
+                <button className="px-1 text-stone-500 hover:text-red-600" onClick={() => queue.remove(d.id)} aria-label={`Remove ${d.title} from queue`}>
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {docs === undefined ? null : docs.length === 0 ? (
         <p className="text-center text-stone-500 dark:text-stone-400">No documents yet.</p>
       ) : (
         <ul className="divide-y divide-stone-200 overflow-hidden rounded-xl border border-stone-200 bg-white dark:divide-stone-800 dark:border-stone-800 dark:bg-stone-900">
           {docs.map((d) => (
-            <DocRow key={d.id} doc={d} ocrActive={ocrStatus.running && ocrStatus.docId === d.id} />
+            <DocRow key={d.id} doc={d} ocrActive={ocrStatus.running && ocrStatus.docId === d.id} queued={queued.includes(d.id)} />
           ))}
         </ul>
       )}
@@ -129,7 +171,7 @@ export function Library() {
   );
 }
 
-function DocRow({ doc, ocrActive }: { doc: DocRecord; ocrActive: boolean }) {
+function DocRow({ doc, ocrActive, queued }: { doc: DocRecord; ocrActive: boolean; queued: boolean }) {
   const [renaming, setRenaming] = useState(false);
   const [rereading, setRereading] = useState<string | null>(null);
   const [title, setTitle] = useState(doc.title);
@@ -176,6 +218,13 @@ function DocRow({ doc, ocrActive }: { doc: DocRecord; ocrActive: boolean }) {
           )}
         </div>
       </div>
+      <button
+        className={`text-sm ${queued ? 'font-medium text-sky-700 dark:text-sky-400' : 'text-stone-500 hover:text-stone-900 dark:hover:text-stone-100'}`}
+        onClick={() => (queued ? queue.remove(doc.id) : queue.add(doc.id))}
+        title={queued ? 'Remove from Up next' : 'Add to Up next'}
+      >
+        {queued ? '✓ Queued' : '+ Queue'}
+      </button>
       {doc.kind === 'pdf' && (
         <button
           className="text-sm text-stone-500 hover:text-stone-900 disabled:opacity-40 dark:hover:text-stone-100"

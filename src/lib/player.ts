@@ -1,6 +1,7 @@
 import { isKokoroVoice, kokoro } from './engines/kokoro';
 import type { SpeechEngine, Utterance } from './engines/types';
 import { WebSpeechEngine } from './engines/webSpeech';
+import { applyPronunciations, type Pronunciation } from './pronounce';
 import { applySkips, inlineSkips, skippedBlocks, type SkipOptions } from './skip';
 import type { Block, Position } from './types';
 
@@ -36,13 +37,22 @@ export interface PlayerState {
   /** waiting for audio to be generated */
   buffering: boolean;
   sleep: SleepTimer;
+  /** reached the end of the document */
+  ended: boolean;
 }
 
 const HAS_WORD = /[\p{L}\p{N}]/u;
 
-export function buildItems(blocks: Block[], skip?: SkipOptions): PlayItem[] {
+export interface BuildOptions {
+  /** paragraphs to leave out (defaults to skippedBlocks(blocks, skip)) */
+  skipped?: Set<string>;
+  pronunciations?: Pronunciation[];
+}
+
+export function buildItems(blocks: Block[], skip?: SkipOptions, opts: BuildOptions = {}): PlayItem[] {
   const items: PlayItem[] = [];
-  const skippedIds = skip ? skippedBlocks(blocks, skip) : new Set<string>();
+  const skippedIds = opts.skipped ?? (skip ? skippedBlocks(blocks, skip) : new Set<string>());
+  const pron = opts.pronunciations ?? [];
   for (const b of blocks) {
     if (skippedIds.has(b.id)) continue;
     const ranges = skip ? inlineSkips(b.text, skip) : [];
@@ -51,7 +61,7 @@ export function buildItems(blocks: Block[], skip?: SkipOptions): PlayItem[] {
       const local = ranges
         .filter(([a, z]) => z > s && a < e)
         .map(([a, z]): [number, number] => [Math.max(0, a - s), Math.min(e - s, z - s)]);
-      const { speak, map } = applySkips(text, local);
+      const { speak, map } = applyPronunciations(applySkips(text, local), pron);
       if (!HAS_WORD.test(speak)) return;
       items.push({
         blockId: b.id,
@@ -110,6 +120,8 @@ export class SpeechPlayer {
   private listeners = new Set<() => void>();
   private token = 0;
   private handle: Utterance | null = null;
+  /** a "try it" sample, separate from the reading position */
+  private previewHandle: Utterance | null = null;
   /** handle is paused in place and can be resumed */
   private heldPaused = false;
   /** char offset (in item.speak) to start from next time */
@@ -134,6 +146,7 @@ export class SpeechPlayer {
       total: 0,
       buffering: false,
       sleep: null,
+      ended: false,
     };
   }
 
@@ -207,7 +220,7 @@ export class SpeechPlayer {
       this.endedAtLast = false;
       this.set({ index: 0 });
     }
-    this.set({ playing: true, error: null });
+    this.set({ playing: true, error: null, ended: false });
     if (this.heldPaused && this.handle?.resume) {
       this.heldPaused = false;
       this.handle.resume();
@@ -241,7 +254,7 @@ export class SpeechPlayer {
     this.resumeChar = 0;
     this.lastWordChar = 0;
     this.endedAtLast = false;
-    this.set({ index: i, word: null });
+    this.set({ index: i, word: null, ended: false });
     if (this.state.playing) {
       clearTimeout(this.restartTimer);
       this.speakCurrent();
@@ -330,7 +343,19 @@ export class SpeechPlayer {
     }, RESTART_DELAY_MS);
   }
 
+  /** Say a short sample with the current voice and speed, without moving the reading position. */
+  preview(text: string) {
+    if (this.state.playing) this.pause();
+    this.previewHandle?.stop();
+    const done = () => {
+      this.previewHandle = null;
+    };
+    this.previewHandle = this.engine.speak(text, { voiceId: this.state.voiceURI ?? '', rate: this.state.rate }, { onStart() {}, onWord() {}, onEnd: done, onError: done });
+  }
+
   private stopUtterance() {
+    this.previewHandle?.stop();
+    this.previewHandle = null;
     this.token++;
     clearTimeout(this.gapTimer);
     this.handle?.stop();
@@ -406,7 +431,7 @@ export class SpeechPlayer {
     const next = this.items[this.state.index + 1];
     if (!next) {
       this.endedAtLast = true;
-      this.set({ playing: false, word: null });
+      this.set({ playing: false, word: null, ended: true });
       return;
     }
     // Move the position now, so pausing during the gap resumes at the next sentence.

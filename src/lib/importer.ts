@@ -90,3 +90,20 @@ export async function reextractPdf(docId: string, onProgress?: (msg: string) => 
     await db.docs.update(docId, { pageCount: pages.length, ocrPending: pages.filter((p) => p.status === 'ocr-pending').length });
   });
 }
+
+/** Replace one paragraph's text (e.g. fixing an OCR mistake). */
+export async function updateBlockText(docId: string, blockId: string, text: string): Promise<void> {
+  const [page, index] = blockId.split('-').map(Number);
+  await db.transaction('rw', db.pages, async () => {
+    const rec = await db.pages.get([docId, page]);
+    if (!rec) return;
+    const blocks = rec.blocks.map((b) => {
+      if (b.id !== blockId) return b;
+      const nb = makeBlock(page, index, text.replace(/\s+/g, ' ').trim(), b.heading, b.small, b.margin);
+      nb.id = b.id;
+      nb.edited = true;
+      return nb;
+    });
+    await db.pages.update([docId, page], { blocks });
+  });
+}

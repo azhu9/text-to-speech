@@ -50,6 +50,18 @@ Other commands: `npm test` (unit tests), `npm run build` (production build in `d
   `(Smith et al., 2020)`, web links and emails, figure/table captions,
   reference lists, and footnotes (small print in PDFs). Skipped text stays
   visible in grey.
+- **Paragraph menu** (hover a paragraph and click ⋯, or right-click it):
+  read from here, don't read this paragraph, don't read anything like it (in
+  this document or in all documents, which is handy for footers the automatic
+  cleanup misses), read a paragraph that was skipped automatically, and
+  **edit text** to fix scan mistakes. Your choices are listed (with Undo) in
+  the Skip menu.
+- **Side panel:** **Contents** (headings or pages, with the current section
+  marked), **Search** (results list; matches highlighted in the text),
+  **Notes**, and **Pronounce**: teach the voice how to say words ("ATP" →
+  "A T P"), with a "Try it" button. Selecting a word offers "Pronounce…".
+- **Listening queue:** "+ Queue" documents in the library; when one ends the
+  next starts automatically from where you left off.
 - **Highlights and notes:** select text to highlight it in 4 colours, add a
   note, or start listening from there. Notes sidebar, click a note to jump
   to it, export everything as Markdown.

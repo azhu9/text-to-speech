@@ -1,20 +1,48 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { db, newId } from '../lib/db';
-import { openLibrary } from '../lib/nav';
+import { updateBlockText } from '../lib/importer';
+import { loadPronunciations, savePronunciations, type Pronunciation } from '../lib/pronounce';
+import { openDoc, openLibrary } from '../lib/nav';
+import { queue, useQueue } from '../lib/queue';
 import { ocr } from '../lib/ocr';
 import { buildItems, SpeechPlayer } from '../lib/player';
 import { blockOrder } from '../lib/segment';
-import { inlineSkips, loadSkipOptions, saveSkipOptions, SKIP_LABELS, skippedBlocks, type Range, type SkipOptions } from '../lib/skip';
+import {
+  applyUserRules,
+  inlineSkips,
+  loadGlobalPatterns,
+  loadSkipOptions,
+  saveGlobalPatterns,
+  saveSkipOptions,
+  SKIP_LABELS,
+  skippedBlocks,
+  type Range,
+  type SkipOptions,
+} from '../lib/skip';
 import { readSelection, type TextSelection } from '../lib/selection';
-import type { Annotation, Block, HighlightColor } from '../lib/types';
+import type { Annotation, Block, DocRules, HighlightColor } from '../lib/types';
+import { BlockEditor, BlockMenu, type BlockMenuAction } from './BlockMenu';
 import { BlockView } from './BlockView';
 import { COLORS, NotesPanel } from './NotesPanel';
+import { ContentsTab, findInBlocks, PronounceTab, SearchTab, SidePanel, type SearchHit, type SideTab } from './SidePanel';
 import { PlayerBar } from './PlayerBar';
 
 const EMPTY: Annotation[] = [];
 const NO_RANGES: Range[] = [];
 const FONT_KEY = 'read-aloud:font-size';
+const PANEL_KEY = 'read-aloud:panel';
+const PANEL_TABS: SideTab[] = ['contents', 'search', 'notes', 'pronounce'];
+function loadPanel(): SideTab | null {
+  try {
+    const v = localStorage.getItem(PANEL_KEY);
+    if (v === 'closed') return null;
+    return PANEL_TABS.includes(v as SideTab) ? (v as SideTab) : 'contents';
+  } catch {
+    return 'contents';
+  }
+}
+const short = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 function annotationSortKey(a: Annotation): [number, number, number] {
   const r = a.ranges[0];
@@ -37,14 +65,22 @@ function loadFontSize() {
   }
 }
 
-export function Reader({ docId }: { docId: string }) {
+export function Reader({ docId, autoplay = false }: { docId: string; autoplay?: boolean }) {
   const doc = useLiveQuery(() => db.docs.get(docId), [docId], null);
   const pages = useLiveQuery(() => db.pages.where('docId').equals(docId).sortBy('page'), [docId]);
   const annotationsRaw = useLiveQuery(() => db.annotations.where('docId').equals(docId).toArray(), [docId]);
 
   const [player] = useState(() => new SpeechPlayer());
   const state = useSyncExternalStore(player.subscribe, player.getState);
-  const [showNotes, setShowNotes] = useState(true);
+  const [panel, setPanel] = useState<SideTab | null>(loadPanel);
+  const [globalPatterns, setGlobalPatterns] = useState<string[]>(loadGlobalPatterns);
+  const [pronunciations, setPronunciations] = useState<Pronunciation[]>(loadPronunciations);
+  const [pronounceDraft, setPronounceDraft] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; blockId: string } | null>(null);
+  const [hover, setHover] = useState<{ blockId: string; top: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const [selectedAnn, setSelectedAnn] = useState<{ id: string; focusNote: boolean } | null>(null);
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [fontSize, setFontSize] = useState(loadFontSize);
@@ -56,8 +92,12 @@ export function Reader({ docId }: { docId: string }) {
   const initialized = useRef(false);
 
   const blocks = useMemo<Block[]>(() => (pages ?? []).flatMap((p) => p.blocks), [pages]);
-  const items = useMemo(() => buildItems(blocks, skip), [blocks, skip]);
-  const skippedIds = useMemo(() => skippedBlocks(blocks, skip), [blocks, skip]);
+  const autoSkipped = useMemo(() => skippedBlocks(blocks, skip), [blocks, skip]);
+  // doc changes on every position save; only recompute when the rules change.
+  const rulesKey = JSON.stringify(doc?.rules ?? {});
+  const rules = useMemo<DocRules>(() => JSON.parse(rulesKey), [rulesKey]);
+  const skippedIds = useMemo(() => applyUserRules(blocks, autoSkipped, rules, globalPatterns), [blocks, autoSkipped, rules, globalPatterns]);
+  const items = useMemo(() => buildItems(blocks, skip, { skipped: skippedIds, pronunciations }), [blocks, skip, skippedIds, pronunciations]);
   const skipRanges = useMemo(() => {
     const m = new Map<string, Range[]>();
     for (const b of blocks) {
@@ -66,6 +106,17 @@ export function Reader({ docId }: { docId: string }) {
     }
     return m;
   }, [blocks, skip]);
+  // Search matches, highlighted in the text while the Search tab is open.
+  const marksByBlock = useMemo(() => {
+    const m = new Map<string, Range[]>();
+    if (panel !== 'search') return m;
+    for (const h of findInBlocks(blocks, searchQuery)) {
+      const list = m.get(h.blockId) ?? [];
+      list.push([h.start, h.end]);
+      m.set(h.blockId, list);
+    }
+    return m;
+  }, [blocks, searchQuery, panel]);
   // wordsAfter[i] = words from sentence i to the end
   const wordsAfter = useMemo(() => {
     const out = new Array<number>(items.length + 1).fill(0);
@@ -74,6 +125,15 @@ export function Reader({ docId }: { docId: string }) {
   }, [items]);
 
   useEffect(() => saveSkipOptions(skip), [skip]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_KEY, panel ?? 'closed');
+    } catch {
+      /* ignore */
+    }
+  }, [panel]);
+  useEffect(() => saveGlobalPatterns(globalPatterns), [globalPatterns]);
+  useEffect(() => savePronunciations(pronunciations), [pronunciations]);
   const annotations = useMemo(() => [...(annotationsRaw ?? [])].sort(compareAnnotations), [annotationsRaw]);
   const annsByBlock = useMemo(() => {
     const m = new Map<string, Annotation[]>();
@@ -91,14 +151,36 @@ export function Reader({ docId }: { docId: string }) {
     if (!doc || !pages) return;
     if (!initialized.current) {
       initialized.current = true;
-      player.setItems(items, doc.position);
+      // Finished documents start over.
+      player.setItems(items, doc.progress >= 0.999 ? undefined : doc.position);
       void db.docs.update(docId, { openedAt: Date.now() });
+      queue.remove(docId);
+      if (autoplay) {
+        // Clear "?play=1" so a reload doesn't auto-start.
+        history.replaceState(null, '', `#/doc/${encodeURIComponent(docId)}`);
+        setTimeout(() => player.play(), 300);
+      }
     } else {
       player.setItems(items);
     }
   }, [items, doc, pages, player, docId]);
 
   useEffect(() => () => player.destroy(), [player]);
+
+  // Listening queue: when this document ends, continue with the next one.
+  const queued = useQueue();
+  const upNextId = queued.find((id) => id !== docId);
+  const upNext = useLiveQuery(() => (upNextId ? db.docs.get(upNextId) : undefined), [upNextId]);
+  const playNext = useCallback(() => {
+    const next = queue.takeNext(docId);
+    if (next) openDoc(next, { autoplay: true });
+  }, [docId]);
+  useEffect(() => {
+    if (state.ended && upNextId) {
+      const t = setTimeout(playNext, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [state.ended, upNextId, playNext]);
 
   const current = items[state.index];
   const currentPage = current ? blockOrder(current.blockId)[0] : 1;
@@ -176,7 +258,7 @@ export function Reader({ docId }: { docId: string }) {
     const annId = target.closest<HTMLElement>('[data-ann]')?.dataset.ann;
     if (annId) {
       setSelectedAnn({ id: annId, focusNote: false });
-      setShowNotes(true);
+      setPanel('notes');
     }
     const s = target.closest<HTMLElement>('[data-s]')?.dataset.s;
     const blockId = target.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
@@ -194,7 +276,7 @@ export function Reader({ docId }: { docId: string }) {
     window.getSelection()?.removeAllRanges();
     setSelection(null);
     if (withNote) {
-      setShowNotes(true);
+      setPanel('notes');
       setSelectedAnn({ id: a.id, focusNote: true });
     }
   }
@@ -219,6 +301,79 @@ export function Reader({ docId }: { docId: string }) {
     const block = blocks.find((b) => b.id === r.blockId);
     const idx = block?.sentences.findIndex(([, e]) => r.start < e) ?? -1;
     if (idx >= 0) player.seekTo({ blockId: r.blockId, sentence: idx });
+  }
+
+  /** Scroll to a paragraph and move the reading position there. */
+  function goToBlock(blockId: string, char = 0, play = false) {
+    const el = textRef.current?.querySelector(`[data-block-id="${blockId}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    userScrolledAt.current = Date.now();
+    const block = blocks.find((b) => b.id === blockId);
+    const idx = block?.sentences.findIndex(([, e]) => char < e) ?? -1;
+    player.seekTo({ blockId, sentence: Math.max(0, idx) }, play);
+  }
+
+  function goToHit(h: SearchHit) {
+    goToBlock(h.blockId, h.start);
+  }
+
+  function updateRules(fn: (r: DocRules) => DocRules) {
+    const next = fn(rules);
+    const clean: DocRules = {};
+    if (next.skip?.length) clean.skip = [...new Set(next.skip)];
+    if (next.read?.length) clean.read = [...new Set(next.read)];
+    if (next.patterns?.length) clean.patterns = [...new Set(next.patterns)];
+    void db.docs.update(docId, { rules: clean });
+  }
+
+  function blockActions(blockId: string): BlockMenuAction[] {
+    const block = blocks.find((b) => b.id === blockId);
+    if (!block) return [];
+    const skipped = skippedIds.has(blockId);
+    const userSkipped = !!rules.skip?.includes(blockId);
+    const actions: BlockMenuAction[] = [];
+    if (!skipped) actions.push({ label: '▶ Read from here', onClick: () => goToBlock(blockId, 0, true) });
+    if (skipped)
+      actions.push({
+        label: 'Read this paragraph',
+        hint: userSkipped ? 'Undo "skip"' : 'It was skipped automatically',
+        onClick: () => updateRules((r) => ({ ...r, skip: r.skip?.filter((id) => id !== blockId), read: userSkipped ? r.read : [...(r.read ?? []), blockId] })),
+      });
+    else
+      actions.push(
+        {
+          label: "Don't read this paragraph",
+          onClick: () => updateRules((r) => ({ ...r, skip: [...(r.skip ?? []), blockId], read: r.read?.filter((id) => id !== blockId) })),
+        },
+        {
+          label: "Don't read anything like this",
+          hint: 'Skips similar paragraphs in this document (e.g. a repeated footer)',
+          onClick: () => updateRules((r) => ({ ...r, patterns: [...(r.patterns ?? []), block.text], read: r.read?.filter((id) => id !== blockId) })),
+        },
+        {
+          label: "Don't read anything like this, in any document",
+          hint: 'For notices that show up in many files',
+          onClick: () => setGlobalPatterns((g) => [...g, block.text]),
+        },
+      );
+    actions.push({ label: 'Edit text…', hint: 'Fix a misread word or sentence', onClick: () => setEditing(blockId) });
+    return actions;
+  }
+
+  function onTextMouseMove(e: React.MouseEvent) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-block-id]');
+    if (!el || !textRef.current) return;
+    const id = el.dataset.blockId!;
+    if (hover?.blockId !== id) setHover({ blockId: id, top: el.offsetTop });
+  }
+
+  function onTextContextMenu(e: React.MouseEvent) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return; // keep the browser menu for copying a selection
+    const id = (e.target as HTMLElement).closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
+    if (!id) return;
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, blockId: id });
   }
 
   function exportNotes() {
@@ -292,7 +447,26 @@ export function Reader({ docId }: { docId: string }) {
                   <span>{SKIP_LABELS[k]}</span>
                 </label>
               ))}
-              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">Skipped text stays visible in grey.</p>
+              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+                Skipped text stays visible in grey. Right-click any paragraph (or use its ⋯ button) to skip it or similar ones.
+              </p>
+              {(rules.skip?.length || rules.read?.length || rules.patterns?.length || globalPatterns.length) ? (
+                <div className="mt-3 border-t border-stone-200 pt-2 text-xs dark:border-stone-700">
+                  <p className="mb-1 font-medium">Your choices</p>
+                  {!!rules.skip?.length && (
+                    <RuleRow text={`${rules.skip.length} paragraph${rules.skip.length === 1 ? '' : 's'} skipped in this document`} onRemove={() => updateRules((r) => ({ ...r, skip: [] }))} />
+                  )}
+                  {!!rules.read?.length && (
+                    <RuleRow text={`${rules.read.length} paragraph${rules.read.length === 1 ? '' : 's'} always read here`} onRemove={() => updateRules((r) => ({ ...r, read: [] }))} />
+                  )}
+                  {rules.patterns?.map((t) => (
+                    <RuleRow key={t} text={`Like “${short(t, 40)}” (this document)`} onRemove={() => updateRules((r) => ({ ...r, patterns: r.patterns?.filter((x) => x !== t) }))} />
+                  ))}
+                  {globalPatterns.map((t) => (
+                    <RuleRow key={t} text={`Like “${short(t, 40)}” (all documents)`} onRemove={() => setGlobalPatterns((g) => g.filter((x) => x !== t))} />
+                  ))}
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -305,10 +479,11 @@ export function Reader({ docId }: { docId: string }) {
           </button>
         </div>
         <button
-          className={`rounded px-2 py-1 text-sm ${showNotes ? 'bg-stone-200 dark:bg-stone-800' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
-          onClick={() => setShowNotes((s) => !s)}
+          className={`rounded px-2 py-1 text-sm ${panel ? 'bg-stone-200 dark:bg-stone-800' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+          onClick={() => setPanel((p) => (p ? null : 'contents'))}
+          title="Contents, search, notes and pronunciations"
         >
-          Notes{annotations.length ? ` (${annotations.length})` : ''}
+          Panel{annotations.length ? ` · ${annotations.length} notes` : ''}
         </button>
       </header>
 
@@ -321,12 +496,31 @@ export function Reader({ docId }: { docId: string }) {
         >
           <div
             ref={textRef}
-            className="mx-auto max-w-3xl px-6 py-10 font-serif leading-relaxed"
+            className="relative mx-auto max-w-3xl px-8 py-10 font-serif leading-relaxed"
             style={{ fontSize }}
             onMouseUp={updateSelection}
             onKeyUp={updateSelection}
             onClick={onTextClick}
+            onMouseMove={onTextMouseMove}
+            onMouseLeave={() => setHover(null)}
+            onContextMenu={onTextContextMenu}
           >
+            {hover && !editing && (
+              <button
+                className="absolute left-0 z-10 grid h-7 w-7 place-items-center rounded font-sans text-base leading-none text-stone-400 hover:bg-stone-200 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                style={{ top: hover.top }}
+                aria-label="Paragraph options"
+                title="Paragraph options (or right-click)"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setMenu({ x: r.left, y: r.bottom + 4, blockId: hover.blockId });
+                }}
+              >
+                ⋯
+              </button>
+            )}
             {!pages ? (
               <p className="text-stone-500">Loading…</p>
             ) : !items.length && !doc?.ocrPending ? (
@@ -355,6 +549,18 @@ export function Reader({ docId }: { docId: string }) {
                   )}
                   {p.blocks.map((b) => {
                     const active = current?.blockId === b.id;
+                    if (editing === b.id)
+                      return (
+                        <BlockEditor
+                          key={b.id}
+                          text={b.text}
+                          onCancel={() => setEditing(null)}
+                          onSave={(t) => {
+                            setEditing(null);
+                            if (t.trim() && t.trim() !== b.text) void updateBlockText(docId, b.id, t);
+                          }}
+                        />
+                      );
                     return (
                       <BlockView
                         key={b.id}
@@ -364,6 +570,7 @@ export function Reader({ docId }: { docId: string }) {
                         annotations={annsByBlock.get(b.id) ?? EMPTY}
                         skipped={skippedIds.has(b.id)}
                         skips={skipRanges.get(b.id) ?? NO_RANGES}
+                        marks={marksByBlock.get(b.id) ?? NO_RANGES}
                       />
                     );
                   })}
@@ -373,22 +580,39 @@ export function Reader({ docId }: { docId: string }) {
           </div>
         </div>
 
-        {showNotes && (
-          <div className="hidden w-80 shrink-0 lg:block">
-            <NotesPanel
-              annotations={annotations}
-              selectedId={selectedAnn?.id ?? null}
-              focusNote={!!selectedAnn?.focusNote}
-              showPages={doc?.kind === 'pdf'}
-              onSelect={goToAnnotation}
-              onExport={exportNotes}
-              onClose={() => setShowNotes(false)}
-            />
+        {panel && (
+          <div className="hidden w-[22rem] shrink-0 lg:block">
+            <SidePanel tab={panel} onTab={setPanel} onClose={() => setPanel(null)}>
+              {panel === 'contents' && (
+                <ContentsTab blocks={blocks} skipped={skippedIds} isPdf={doc?.kind === 'pdf'} currentBlockId={current?.blockId} onGo={(id) => goToBlock(id)} />
+              )}
+              {panel === 'search' && <SearchTab blocks={blocks} isPdf={doc?.kind === 'pdf'} query={searchQuery} onQuery={setSearchQuery} onGo={goToHit} />}
+              {panel === 'notes' && (
+                <NotesPanel
+                  annotations={annotations}
+                  selectedId={selectedAnn?.id ?? null}
+                  focusNote={!!selectedAnn?.focusNote}
+                  showPages={doc?.kind === 'pdf'}
+                  onSelect={goToAnnotation}
+                  onExport={exportNotes}
+                />
+              )}
+              {panel === 'pronounce' && (
+                <PronounceTab list={pronunciations} onChange={setPronunciations} draft={pronounceDraft} onTry={(t) => player.preview(t)} />
+              )}
+            </SidePanel>
           </div>
         )}
       </div>
 
-      <PlayerBar player={player} state={state} wordsLeft={wordsAfter[state.index] ?? 0} />
+      <PlayerBar
+        player={player}
+        state={state}
+        wordsLeft={wordsAfter[state.index] ?? 0}
+        upNext={upNext ? { title: upNext.title, onPlay: playNext } : undefined}
+      />
+
+      {menu && <BlockMenu x={menu.x} y={menu.y} actions={blockActions(menu.blockId)} onClose={closeMenu} />}
 
       {selection && (
         <div
@@ -409,8 +633,35 @@ export function Reader({ docId }: { docId: string }) {
           <button className="rounded px-2 py-0.5 hover:bg-white/10" onClick={listenFromSelection}>
             ▶ Listen from here
           </button>
+          {selection.quote.length <= 40 && !selection.quote.includes('\n') && (
+            <button
+              className="rounded px-2 py-0.5 hover:bg-white/10"
+              title="Change how this word is said"
+              onClick={() => {
+                setPronounceDraft(selection.quote.trim());
+                setPanel('pronounce');
+                window.getSelection()?.removeAllRanges();
+                setSelection(null);
+              }}
+            >
+              Pronounce…
+            </button>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function RuleRow({ text, onRemove }: { text: string; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-2 py-0.5">
+      <span className="min-w-0 flex-1 truncate" title={text}>
+        {text}
+      </span>
+      <button className="shrink-0 text-stone-500 hover:text-red-600" onClick={onRemove}>
+        Undo
+      </button>
     </div>
   );
 }

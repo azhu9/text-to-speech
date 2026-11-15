@@ -11,22 +11,18 @@ interface Props {
   showPages: boolean;
   onSelect: (a: Annotation) => void;
   onExport: () => void;
-  onClose: () => void;
 }
 
-export function NotesPanel({ annotations, selectedId, focusNote, showPages, onSelect, onExport, onClose }: Props) {
+export function NotesPanel({ annotations, selectedId, focusNote, showPages, onSelect, onExport }: Props) {
   return (
-    <aside className="flex h-full w-full flex-col border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
-      <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3 dark:border-stone-800">
-        <h2 className="font-semibold">Highlights &amp; notes</h2>
-        <div className="flex items-center gap-3 text-sm">
-          <button className="text-sky-700 hover:underline disabled:opacity-40 dark:text-sky-400" onClick={onExport} disabled={!annotations.length}>
-            Export
-          </button>
-          <button className="text-stone-500 hover:text-stone-900 dark:hover:text-stone-100" onClick={onClose} aria-label="Close notes">
-            ✕
-          </button>
-        </div>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between px-4 pt-3 text-sm">
+        <span className="text-stone-500 dark:text-stone-400">
+          {annotations.length} highlight{annotations.length === 1 ? '' : 's'}
+        </span>
+        <button className="text-sky-700 hover:underline disabled:opacity-40 dark:text-sky-400" onClick={onExport} disabled={!annotations.length}>
+          Export as Markdown
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
         {!annotations.length && (
@@ -38,7 +34,7 @@ export function NotesPanel({ annotations, selectedId, focusNote, showPages, onSe
           <NoteCard key={a.id} a={a} selected={a.id === selectedId} focusNote={focusNote && a.id === selectedId} showPage={showPages} onSelect={onSelect} />
         ))}
       </div>
-    </aside>
+    </div>
   );
 }
 

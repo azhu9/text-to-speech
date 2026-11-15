@@ -12,12 +12,14 @@ interface Props {
   skipped: boolean;
   /** parts of the block that are skipped */
   skips: [number, number][];
+  /** search matches to highlight */
+  marks: [number, number][];
 }
 
 /** One paragraph/heading. The rendered text must equal block.text exactly,
  * because text selections are mapped back to character offsets. */
-export const BlockView = memo(function BlockView({ block, activeSentence, word, annotations, skipped, skips }: Props) {
-  const segments = buildSegments(block, annotations, activeSentence >= 0 ? word : null, skips);
+export const BlockView = memo(function BlockView({ block, activeSentence, word, annotations, skipped, skips, marks }: Props) {
+  const segments = buildSegments(block, annotations, activeSentence >= 0 ? word : null, skips, marks);
   const Tag = block.heading ? 'h2' : 'p';
   let markedActive = false;
   return (
@@ -36,6 +38,7 @@ export const BlockView = memo(function BlockView({ block, activeSentence, word, 
         if (ann) cls.push(`hl-${ann.color}`);
         if (ann?.note) cls.push('underline decoration-dotted decoration-stone-500 underline-offset-4');
         if (active) cls.push(ann ? 'outline outline-2 outline-sky-400/60' : 'bg-sky-100 dark:bg-sky-900/60');
+        if (seg.mark) cls.push('rounded-sm bg-yellow-200 ring-1 ring-yellow-400 dark:bg-yellow-600/60');
         if (seg.word) cls.push('rounded-sm !bg-sky-300 dark:!bg-sky-600');
         const first = active && !markedActive;
         if (first) markedActive = true;
