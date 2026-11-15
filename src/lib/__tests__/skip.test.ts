@@ -4,8 +4,8 @@ import { buildItems } from '../player';
 import { makeBlock } from '../segment';
 import { applySkips, DEFAULT_SKIP, inlineSkips, skippedBlocks, type SkipOptions } from '../skip';
 
-const ALL: SkipOptions = { citations: true, urls: true, captions: true, references: true, footnotes: true };
-const NONE: SkipOptions = { citations: false, urls: false, captions: false, references: false, footnotes: false };
+const ALL: SkipOptions = { furniture: true, citations: true, urls: true, captions: true, references: true, footnotes: true };
+const NONE: SkipOptions = { furniture: false, citations: false, urls: false, captions: false, references: false, footnotes: false };
 
 const spoken = (text: string, o: SkipOptions = ALL) => applySkips(text, inlineSkips(text, o)).speak;
 
@@ -70,5 +70,35 @@ describe('estimateWordTimings', () => {
     for (let i = 1; i < t.length; i++) expect(t[i][2]).toBeGreaterThan(t[i - 1][2]);
     // "world." is followed by a sentence pause, so "Bye" starts late.
     expect(t[3][2] - t[2][2]).toBeGreaterThan(t[1][2] - t[0][2]);
+  });
+});
+
+describe('headers, footers and notices', () => {
+  const page = (p: number, texts: string[]) => texts.map((t, i) => makeBlock(p, i, t));
+  const only = (o: Partial<SkipOptions>): SkipOptions => ({ ...NONE, ...o });
+
+  it('skips running headers repeated across pages, even with OCR typos', () => {
+    const blocks = [
+      ...page(1, ['CHAPTER 3 CELL BIOLOGY 45', 'Cells are the basic unit of life. They were first seen in 1665.', 'Each cell has a membrane.']),
+      ...page(2, ['CHAPTER 3 CELL BI0LOGY 46', 'Mitochondria make energy for the cell.', 'Ribosomes make proteins.']),
+      ...page(3, ['CHAPTER 3 CELL BIOLOGY 47', 'The nucleus holds DNA.', 'It is surrounded by an envelope.']),
+    ];
+    expect([...skippedBlocks(blocks, only({ furniture: true }))].sort()).toEqual(['1-0', '2-0', '3-0']);
+  });
+
+  it('skips one-off distribution notices and page numbers at page edges', () => {
+    const blocks = [
+      ...page(1, ['Introduction to the topic starts here and goes on.', 'More body text in the middle of page one.', 'Distributed by XYZ Course Packs. Not for resale.']),
+      ...page(2, ['Page 2 of 10', 'Body text continues on page two with more ideas.', 'This content downloaded from 1.2.3.4 on Mon, 01 Jan 2024']),
+    ];
+    expect([...skippedBlocks(blocks, only({ furniture: true }))].sort()).toEqual(['1-2', '2-0', '2-2']);
+  });
+
+  it('keeps body text that merely mentions similar words, and blocks marked at import are skipped', () => {
+    const body = makeBlock(1, 0, 'The library provided by the city was printed in 1900 and has a copyright section.');
+    const marked = makeBlock(1, 1, 'Some Journal Name', false, false, true);
+    const tail = makeBlock(1, 2, 'Final sentence of the page about something else.');
+    expect([...skippedBlocks([body, marked, tail], only({ furniture: true }))]).toEqual(['1-1']);
+    expect([...skippedBlocks([body, marked, tail], NONE)]).toEqual([]);
   });
 });

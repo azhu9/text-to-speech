@@ -3,7 +3,7 @@ import type { RecognizeResult, Worker as TesseractWorker } from 'tesseract.js';
 import { db } from './db';
 import { paragraphsToPage } from './importer';
 import { openPdf, renderPage } from './pdf';
-import { linesToParagraphs, type Line } from './pdfLayout';
+import { linesToParagraphs, markMarginBand, type Line } from './pdfLayout';
 import { isPageNumber, textToParagraphs, type Paragraph } from './textImport';
 
 /** Lines Tesseract is less sure about than this are usually noise from figures. */
@@ -11,14 +11,14 @@ const MIN_LINE_CONFIDENCE = 40;
 
 /** Turn Tesseract output into paragraphs using line positions, the same way
  * as text-based PDFs. Falls back to Tesseract's plain text. */
-export function ocrToParagraphs(data: RecognizeResult['data']): Paragraph[] {
+export function ocrToParagraphs(data: RecognizeResult['data'], imageHeight = 0): Paragraph[] {
   const lines: Line[] = [];
   for (const block of data.blocks ?? []) {
     let first = true;
     for (const para of block.paragraphs)
       for (const l of para.lines) {
         const text = l.text.trim();
-        if (!text || l.confidence < MIN_LINE_CONFIDENCE || !/\p{L}/u.test(text) || isPageNumber(text)) continue;
+        if (!text || l.confidence < MIN_LINE_CONFIDENCE || isPageNumber(text) || !/\p{L}/u.test(text)) continue;
         const row = l.rowAttributes as { rowHeight?: number; row_height?: number } | undefined;
         const h = row?.rowHeight || row?.row_height || l.bbox.y1 - l.bbox.y0;
         lines.push({
@@ -34,7 +34,8 @@ export function ocrToParagraphs(data: RecognizeResult['data']): Paragraph[] {
       }
   }
   if (!lines.length) return textToParagraphs(data.text ?? '').filter((p) => !isPageNumber(p.text));
-  return linesToParagraphs(lines);
+  // Image y runs downward; flipped above, so the page spans -height..0.
+  return linesToParagraphs(imageHeight ? markMarginBand(lines, -imageHeight, 0) : lines);
 }
 
 type Listener = (s: OcrStatus) => void;
@@ -153,8 +154,9 @@ class OcrRunner {
           }
           const canvas = await renderPage(pdf, page);
           const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+          const height = canvas.height;
           canvas.width = canvas.height = 0;
-          const paras = ocrToParagraphs(data);
+          const paras = ocrToParagraphs(data, height);
           const rec = paragraphsToPage(docId, page, paras);
           // Document may have been deleted meanwhile.
           if (await db.docs.get(docId)) await db.pages.put(rec);

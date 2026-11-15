@@ -2,6 +2,8 @@ export interface Paragraph {
   text: string;
   heading?: boolean;
   small?: boolean;
+  /** header, footer, page number or margin notice */
+  margin?: boolean;
 }
 
 /** Join hard-wrapped lines into one paragraph, removing end-of-line hyphenation. */
@@ -75,7 +77,7 @@ export function markdownToParagraphs(raw: string): Paragraph[] {
   return out;
 }
 
-const PAGE_NUMBER = /^(?:page\s*)?(?:\d{1,4}|[ivxlcdm]{1,6})$/i;
+const PAGE_NUMBER = /^(?:[-–—|]\s*)?(?:page|p\.|pg\.?)?\s*(?:\d{1,4}|[ivxlcdm]{1,6})(?:\s*(?:of|\/)\s*\d{1,4})?(?:\s*[-–—|])?$/i;
 
 export function isPageNumber(s: string): boolean {
   return PAGE_NUMBER.test(s.trim());

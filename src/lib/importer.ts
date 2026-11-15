@@ -19,7 +19,7 @@ export function paragraphsToPage(docId: string, page: number, paras: Paragraph[]
     docId,
     page,
     status: 'ready',
-    blocks: paras.map((p, i) => makeBlock(page, i, p.text, p.heading, p.small)),
+    blocks: paras.map((p, i) => makeBlock(page, i, p.text, p.heading, p.small, p.margin)),
   };
 }
 
@@ -65,4 +65,28 @@ export async function importFile(file: File, onProgress?: (msg: string) => void)
     if (kind === 'pdf') await db.files.add({ docId: id, blob: file });
   });
   return doc;
+}
+
+/**
+ * Re-run text extraction on a PDF already in the library (e.g. after parsing
+ * improvements). Pages that were converted with OCR keep their text.
+ * Highlights are kept but may shift slightly if paragraph breaks changed.
+ */
+export async function reextractPdf(docId: string, onProgress?: (msg: string) => void): Promise<void> {
+  const [doc, file] = await Promise.all([db.docs.get(docId), db.files.get(docId)]);
+  if (!doc || doc.kind !== 'pdf' || !file) throw new Error('Original PDF not found for this document.');
+  const pdf = await extractPdf(file.blob, (d, t) => onProgress?.(`Reading page ${d} of ${t}…`));
+  const old = new Map((await db.pages.where('docId').equals(docId).toArray()).map((p) => [p.page, p]));
+  const pages: PageRecord[] = pdf.pages.map((paras, i) => {
+    const n = i + 1;
+    if (paras) return paragraphsToPage(docId, n, paras);
+    const prev = old.get(n);
+    // Scanned page: keep earlier OCR text if there is any.
+    return prev && prev.blocks.length ? prev : { docId, page: n, status: 'ocr-pending', blocks: [] };
+  });
+  await db.transaction('rw', [db.docs, db.pages], async () => {
+    await db.pages.where('docId').equals(docId).delete();
+    await db.pages.bulkAdd(pages);
+    await db.docs.update(docId, { pageCount: pages.length, ocrPending: pages.filter((p) => p.status === 'ocr-pending').length });
+  });
 }

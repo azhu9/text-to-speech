@@ -10,6 +10,8 @@ export interface Block {
   heading?: boolean;
   /** smaller than the page's body text (footnotes, captions) */
   small?: boolean;
+  /** header, footer, page number or margin notice (marked at import) */
+  margin?: boolean;
 }
 
 export type PageStatus = 'ready' | 'ocr-pending' | 'ocr-failed';

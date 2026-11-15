@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 import { db, deleteDoc } from '../lib/db';
-import { ACCEPT, importFile, kindOf } from '../lib/importer';
+import { ACCEPT, importFile, kindOf, reextractPdf } from '../lib/importer';
 import { openDoc } from '../lib/nav';
 import { ocr, type OcrStatus } from '../lib/ocr';
 import type { DocRecord } from '../lib/types';
@@ -131,6 +131,7 @@ export function Library() {
 
 function DocRow({ doc, ocrActive }: { doc: DocRecord; ocrActive: boolean }) {
   const [renaming, setRenaming] = useState(false);
+  const [rereading, setRereading] = useState<string | null>(null);
   const [title, setTitle] = useState(doc.title);
   const pct = Math.round(doc.progress * 100);
 
@@ -167,6 +168,7 @@ function DocRow({ doc, ocrActive }: { doc: DocRecord; ocrActive: boolean }) {
           </div>
           <span>{pct}%</span>
           {doc.kind === 'pdf' && <span>{doc.pageCount} pages</span>}
+          {rereading && <span className="text-sky-700 dark:text-sky-400">{rereading}</span>}
           {doc.ocrPending > 0 && (
             <span className="text-amber-700 dark:text-amber-400">
               {ocrActive ? 'Scanning text' : 'Waiting to scan'}: {doc.ocrPending} page{doc.ocrPending === 1 ? '' : 's'} left
@@ -174,6 +176,27 @@ function DocRow({ doc, ocrActive }: { doc: DocRecord; ocrActive: boolean }) {
           )}
         </div>
       </div>
+      {doc.kind === 'pdf' && (
+        <button
+          className="text-sm text-stone-500 hover:text-stone-900 disabled:opacity-40 dark:hover:text-stone-100"
+          disabled={!!rereading}
+          title="Run the latest text cleanup on this PDF again. Scanned pages keep their text."
+          onClick={async () => {
+            if (!confirm(`Re-read the text of "${doc.title}" with the latest cleanup?\n\nYour notes are kept, but highlights may shift slightly if paragraphs change.`)) return;
+            setRereading('Re-reading…');
+            try {
+              await reextractPdf(doc.id, setRereading);
+              ocr.kick();
+            } catch (e) {
+              alert(e instanceof Error ? e.message : String(e));
+            } finally {
+              setRereading(null);
+            }
+          }}
+        >
+          Re-read text
+        </button>
+      )}
       <button className="text-sm text-stone-500 hover:text-stone-900 dark:hover:text-stone-100" onClick={() => setRenaming(true)}>
         Rename
       </button>

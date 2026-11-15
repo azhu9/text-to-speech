@@ -50,10 +50,18 @@ export function splitSentences(text: string, max = MAX_CHUNK): Sentence[] {
   return out;
 }
 
-export function makeBlock(page: number, index: number, text: string, heading = false, small = false): Block {
+export function makeBlock(
+  page: number,
+  index: number,
+  text: string,
+  heading = false,
+  small = false,
+  margin = false,
+): Block {
   const block: Block = { id: `${page}-${index}`, page, text, sentences: splitSentences(text) };
   if (heading) block.heading = true;
   if (small) block.small = true;
+  if (margin) block.margin = true;
   return block;
 }
 

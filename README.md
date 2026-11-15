@@ -26,7 +26,11 @@ Other commands: `npm test` (unit tests), `npm run build` (production build in `d
 
 - **Import** PDF, `.txt` and Markdown by button or drag-and-drop.
 - **PDF cleanup:** joins wrapped lines into paragraphs, fixes words hyphenated
-  across lines, drops running headers/footers and page numbers, detects headings.
+  across lines, detects headings, drops footnote numbers and sideways margin
+  stamps (watermarks, arXiv IDs), and marks running headers/footers, page
+  numbers and notices like "Distributed by…" or "Downloaded from…" so they
+  aren't read. "Re-read text" in the library applies the latest cleanup to
+  PDFs imported earlier.
 - **Scanned PDFs:** pages without a text layer are converted with OCR
   (Tesseract, running in your browser) in the background, starting at the
   page you're reading. You can start listening right away; scanned pages
@@ -41,7 +45,8 @@ Other commands: `npm test` (unit tests), `npm run build` (production build in `d
   - Time left and words per minute at the current speed.
   - **Sleep timer:** stop after 5–60 minutes or at the end of the section.
   - Your reading position is saved for each document.
-- **Skip clutter** (Skip menu in the reader): citations like `[12]` or
+- **Skip clutter** (Skip menu in the reader): headers, footers and page
+  numbers (also on scanned pages, tolerant of OCR typos), citations like `[12]` or
   `(Smith et al., 2020)`, web links and emails, figure/table captions,
   reference lists, and footnotes (small print in PDFs). Skipped text stays
   visible in grey.

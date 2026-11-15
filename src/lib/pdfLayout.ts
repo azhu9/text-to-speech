@@ -18,6 +18,19 @@ export interface Line {
   h: number;
   /** force a paragraph break before this line (e.g. new OCR text block) */
   breakBefore?: boolean;
+  /** page furniture: header, footer, page number, margin notice */
+  margin?: boolean;
+}
+
+/** A small, raised run of digits/symbols right after a word or punctuation. */
+function isFootnoteMarker(r: TextRun, cur: Line): boolean {
+  return (
+    /^[\d*†‡§¶,–-]{1,5}$/.test(r.str.trim()) &&
+    r.h > 0 &&
+    r.h < cur.h * 0.8 &&
+    r.y > cur.y + cur.h * 0.2 &&
+    /[\p{L}.,;:!?)"”’]$/u.test(cur.text)
+  );
 }
 
 /** Group runs into lines, keeping the PDF's content order (which usually
@@ -36,6 +49,8 @@ export function runsToLines(runs: TextRun[]): Line[] {
       } else if (Math.abs(r.y - cur.y) > Math.max(cur.h, r.h, 1) * 0.6 || r.x < cur.x + cur.w - Math.max(cur.h, 1) * 2) {
         push();
         cur = { text: r.str, x: r.x, y: r.y, w: r.w, h: r.h };
+      } else if (isFootnoteMarker(r, cur)) {
+        // Small raised number after a word ("cells.¹²"): a footnote marker, not something to read.
       } else {
         const gap = r.x - (cur.x + cur.w);
         const needSpace = gap > Math.max(r.h, 1) * 0.15 && !/\s$/.test(cur.text) && !/^\s/.test(r.str);
@@ -59,9 +74,10 @@ function median(xs: number[]): number {
 
 const normalizeForRepeat = (s: string) => s.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 
-/** Drop running headers/footers and page numbers: lines near the top or bottom of
- * a page that are page numbers or repeat across many pages. */
-export function removeHeadersFooters(pages: Line[][], edge = 2): Line[][] {
+/** Mark running headers/footers and page numbers: lines near the top or bottom
+ * of a page that are page numbers or repeat across many pages. Marked lines are
+ * kept (shown greyed) but not read when "headers & footers" skipping is on. */
+export function markHeadersFooters(pages: Line[][], edge = 2): Line[][] {
   // Edge = among the top-most / bottom-most lines on the page by position (the
   // content stream often draws headers and page numbers first or last).
   // On short pages only the very first/last line counts.
@@ -82,19 +98,61 @@ export function removeHeadersFooters(pages: Line[][], edge = 2): Line[][] {
       }
     }
   });
-  const threshold = Math.max(3, Math.ceil(pages.filter((p) => p.length).length * 0.3));
+  const threshold = Math.max(2, Math.ceil(pages.filter((p) => p.length).length * 0.25));
   return pages.map((lines, p) =>
-    lines.filter((l, i) => {
-      if (!edgeSets[p].has(i)) return true;
-      if (isPageNumber(l.text)) return false;
-      return (counts.get(normalizeForRepeat(l.text)) ?? 0) < threshold;
+    lines.map((l, i) => {
+      if (l.margin || !edgeSets[p].has(i)) return l;
+      const furniture = isPageNumber(l.text) || (counts.get(normalizeForRepeat(l.text)) ?? 0) >= threshold;
+      return furniture ? { ...l, margin: true } : l;
     }),
   );
 }
 
+/** Kept for callers/tests that want the furniture gone entirely. */
+export function removeHeadersFooters(pages: Line[][], edge = 2): Line[][] {
+  return markHeadersFooters(pages, edge).map((lines) => lines.filter((l) => !l.margin));
+}
+
+/**
+ * Mark lines sitting in the top/bottom margin of the page (within `band` of the
+ * edge) that are set apart from the body: a big gap to the nearest body line,
+ * or smaller type. Catches one-off footers like "Distributed by …".
+ * `bottom`/`top` are the page edges in the same units as line.y (y grows upward).
+ */
+export function markMarginBand(lines: Line[], bottom: number, top: number, band = 0.07): Line[] {
+  const height = top - bottom;
+  if (height <= 0 || lines.length < 2) return lines;
+  const inBand = (l: Line) => l.y - bottom < height * band || top - (l.y + l.h) < height * band;
+  const body = lines.filter((l) => !inBand(l));
+  if (!body.length) return lines;
+  const bodyH = median(body.map((l) => l.h)) || 10;
+  const bodyTop = Math.max(...body.map((l) => l.y + l.h));
+  const bodyBottom = Math.min(...body.map((l) => l.y));
+  return lines.map((l) => {
+    if (!inBand(l)) return l;
+    const gap = l.y > bodyTop ? l.y - bodyTop : bodyBottom - (l.y + l.h);
+    const apart = gap > bodyH * 1.5;
+    const smaller = l.h < bodyH * 0.9;
+    return apart || smaller ? { ...l, margin: true } : l;
+  });
+}
+
 /** Group lines into paragraphs using vertical gaps, font-size changes and
  * short last lines. */
-export function linesToParagraphs(lines: Line[]): Paragraph[] {
+export function linesToParagraphs(all: Line[]): Paragraph[] {
+  // Page furniture is pulled out of the reading flow (so a footer drawn mid-stream
+  // can't split a paragraph) and put back as separate paragraphs at the top/bottom.
+  const lines = all.filter((l) => !l.margin);
+  const margin = all.filter((l) => l.margin);
+  const midY = lines.length ? (Math.max(...lines.map((l) => l.y)) + Math.min(...lines.map((l) => l.y))) / 2 : 0;
+  const furniture = (ls: Line[]): Paragraph[] =>
+    ls.filter((l) => /[\p{L}\p{N}]/u.test(l.text)).map((l) => ({ text: l.text.replace(/\s+/g, ' ').trim(), margin: true }));
+  const top = furniture(margin.filter((l) => l.y >= midY).sort((a, b) => b.y - a.y));
+  const bottom = furniture(margin.filter((l) => l.y < midY).sort((a, b) => b.y - a.y));
+  return [...top, ...bodyParagraphs(lines), ...bottom];
+}
+
+function bodyParagraphs(lines: Line[]): Paragraph[] {
   if (!lines.length) return [];
   const h = median(lines.map((l) => l.h)) || 10;
   const width = median(lines.map((l) => l.w)) || 1;

@@ -121,3 +121,40 @@ describe('removeHeadersFooters ordering', () => {
     ]);
   });
 });
+
+describe('import-time page furniture', () => {
+  it('marks lines in the page margins that are set apart from the body', async () => {
+    const { markMarginBand } = await import('../pdfLayout');
+    const lines = [
+      line('Body line one of the page.', 700),
+      line('Body line two of the page.', 686),
+      line('Distributed by XYZ', 30, { h: 8, w: 100 }),
+    ];
+    expect(markMarginBand(lines, 0, 792).map((l) => !!l.margin)).toEqual([false, false, true]);
+  });
+
+  it('keeps marked furniture out of paragraphs and puts it at the page edges', () => {
+    const paras = linesToParagraphs([
+      line('Journal of Things', 770, { margin: true }),
+      line('This is the first line of a para-', 700),
+      line('Distributed by XYZ', 30, { margin: true }),
+      line('graph that keeps going here.', 688),
+    ]);
+    expect(paras).toEqual([
+      { text: 'Journal of Things', margin: true },
+      { text: 'This is the first line of a paragraph that keeps going here.' },
+      { text: 'Distributed by XYZ', margin: true },
+    ]);
+  });
+
+  it('drops raised footnote numbers after words', () => {
+    const lines = runsToLines([
+      { str: 'Cells divide.', x: 0, y: 700, w: 60, h: 10, eol: false },
+      { str: '12', x: 61, y: 704, w: 6, h: 6, eol: false },
+      { str: ' Then they grow 10', x: 68, y: 700, w: 80, h: 10, eol: false },
+      { str: '3', x: 149, y: 704, w: 3, h: 6, eol: true },
+    ]);
+    // The footnote marker is gone; an exponent after a number is kept.
+    expect(lines[0].text).toBe('Cells divide. Then they grow 10 3');
+  });
+});
